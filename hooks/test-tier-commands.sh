@@ -139,7 +139,7 @@ hookv2 "${V2DATA}" audit agent "$(mk "${V2SIMPLE}" sonnet)" >/dev/null
 V2REP="$(env -u TIER_GUARD_MODE HOME="${FAKEHOME}" python3 "${ROOT}/hooks/tier_report.py" --data "${V2DATA}")"
 check "v2 report：列出请求、选择、hook 改写输出与实际观测" \
   "$(yn has "${V2REP}" "### v2 路由审计")"
-v2_host_capability() { has "${V2REP}" "宿主可改写" && has "${V2REP}" "否"; }
+v2_host_capability() { has "${V2REP}" "宿主可改写" && has "${V2REP}" "是"; }
 check "v2 report：列出宿主是否获准派发前改写" "$(yn v2_host_capability)"
 v2_profiles() { has "${V2REP}" "audit：2 / auto：1" && has "${V2REP}" "haiku"; }
 check "v2 report：audit / auto 分开且能看到 selected haiku" \

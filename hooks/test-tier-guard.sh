@@ -48,7 +48,7 @@ runv2with() {  # $1=profile $2=payload $3=config [$4=事件]
   RC=$?
 }
 runv2() { runv2with "$1" "$2" "${ROOT}/config/routing.catalog.v2.json" "${3:-agent}"; }
-runv2verified() { runv2with "$1" "$2" "${V2_VERIFIED_CONFIG}" "${3:-agent}"; }
+runv2unverified() { runv2with "$1" "$2" "${V2_UNVERIFIED_CONFIG}" "${3:-agent}"; }
 V2_CATALOG_SHA="$(shasum -a 256 "${ROOT}/config/routing.catalog.v2.json" | awk '{print $1}')"
 # 用 python 拼 payload / 断言 JSON，避免 jq 依赖
 mk() {  # $1=prompt $2=model(- 不传) $3=subagent_type
@@ -85,12 +85,12 @@ PY
 }
 yn() { if "$@"; then echo yes; else echo no; fi; }
 
-# 这份目录只用于验证已获得宿主拦截证据时的编码；生产目录必须保持未验证状态。
-V2_VERIFIED_CONFIG="${TMP}/routing.catalog.v2.verified.json"
-python3 - "${ROOT}/config/routing.catalog.v2.json" "${V2_VERIFIED_CONFIG}" <<'PY'
+# 反向用例：即使处在 auto，未获宿主授权的目录也必须只审计。
+V2_UNVERIFIED_CONFIG="${TMP}/routing.catalog.v2.unverified.json"
+python3 - "${ROOT}/config/routing.catalog.v2.json" "${V2_UNVERIFIED_CONFIG}" <<'PY'
 import json, sys
 cfg = json.load(open(sys.argv[1], encoding="utf-8"))
-cfg.setdefault("host_capabilities", {}).setdefault("claude-code", {})["pre_dispatch_apply"] = True
+cfg.setdefault("host_capabilities", {}).setdefault("claude-code", {})["pre_dispatch_apply"] = False
 with open(sys.argv[2], "w", encoding="utf-8") as fh:
     json.dump(cfg, fh, ensure_ascii=False)
 PY
@@ -209,13 +209,13 @@ check "v2 audit：记录 v2 决策且 applied=false" \
   "$(lastlog 'r["routing_version"] == 2 and r["decision"]["action"] == "select" and r["decision"]["target"]["model"] == "haiku" and r["applied"] is False')"
 check "v2 audit：记录实际读取目录的来源与内容指纹，不记录路径" \
   "$(lastlog 'r["catalog_identity"] == {"origin": "environment", "sha256": "'"${V2_CATALOG_SHA}"'"}')"
-runv2 auto "${V2SIMPLE}"
+runv2unverified auto "${V2SIMPLE}"
 check "v2 auto：未验证宿主不得改写参数，仍只审计" \
   "$(yn [ "${RC}" -eq 0 -a -z "${OUT}" ])"
 check "v2 auto：未验证宿主记录 applied=false" \
   "$(lastlog 'r["routing_version"] == 2 and r["decision"]["action"] == "select" and r["applied"] is False and r["host_pre_dispatch_apply"] is False')"
-runv2verified auto "${V2SIMPLE}"
-check "v2 auto：已验证宿主才选择低成本 haiku" \
+runv2 auto "${V2SIMPLE}"
+check "v2 auto：已验证 Claude 宿主选择低成本 haiku" \
   "$(jsonq 'o["hookSpecificOutput"]["hookEventName"] == "PreToolUse" and o["hookSpecificOutput"]["updatedInput"]["model"] == "haiku"')"
 check "v2 auto：已验证 Claude 编码不附带 permissionDecision" \
   "$(jsonq '"permissionDecision" not in o["hookSpecificOutput"]')"

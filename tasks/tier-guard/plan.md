@@ -224,9 +224,11 @@ Codex Desktop 与 CLI 都已实际回执 `luna/medium`、`terra/high`、`terra/x
 - [x] Documentation checks and focused doctor tests pass.
 - [x] A reviewer can trace each host claim to a reproducible evidence file.
 
-**2026-09-12 status:** the [v2 compatibility table](../../docs/research/2026-09-12-v2-compatibility-status.md)
-labels every host independently. CLI parameter application is verified but Task 7's low-cost receipt
-remains open; this task preserves that distinction rather than converting it into a broad routing claim.
+**2026-09-13 status:** the [v2 compatibility table](../../docs/research/2026-09-12-v2-compatibility-status.md)
+labels every host independently. Claude Code CLI `2.1.269` now has a real low-cost Haiku receipt and may
+open its host capability gate while staying default-audit; Codex Task 7's independent low-cost hook receipt
+remains open because its V2 input is opaque. This task preserves that distinction rather than converting it
+into a broad routing claim.
 
 **Dependencies:** Tasks 6 and 7.
 **Files likely touched:** `commands/tier_doctor.md`, `hooks/tier_doctor.py`, `docs/research/`, `skills/tier-routing/SKILL.md`.

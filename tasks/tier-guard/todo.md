@@ -13,8 +13,7 @@
 - [x] Checkpoint · Local full validation
 - [ ] Task 7 · Codex CLI hook 独立的真实低成本子代理验证（阻塞：hook 输入为 `opaque_token`）
 - [x] Task 8 · 宿主兼容性与 Desktop 升级条件
-- [ ] Checkpoint · v2 review（阻塞：Task 7 仍等待上游提供任务明文或可信结构化信号；另需确认
-  旧 `SPEC.md` 删除与未跟踪源码树是预期的规格迁移后，才能安全建立可审查的 Git 变更集。）
+- [ ] Checkpoint · v2 review（阻塞：Task 7 仍等待上游提供任务明文或可信结构化信号。）
 
 ## 待补宿主验收（不改变生产配置）
 
@@ -23,6 +22,10 @@
   child 的 SQLite 回执依次为 `luna/medium`、`terra/high`、`terra/xhigh`；三条原生 hook 审计均为
   `opaque_token`、显式 pin、`applied=false`。详见
   [`Task 7 CLI v2 smoke`](../../docs/research/2026-09-12-task7-codex-cli-v2-smoke.md)。
+
+- [x] Claude Code CLI v2：真实 `PreToolUse` audit 与受控 auto 都已验证；明确只读的未 pin child
+  实际回执为 `claude-haiku-4-5-20251001`。生产仍默认 audit，Cloud 未外推。详见
+  [`Claude CLI v2 smoke`](../../docs/research/2026-09-13-claude-cli-v2-smoke.md)。
 
 ## 上游前置条件（不在本插件内绕过）
 

@@ -94,7 +94,7 @@ def main():
         disk_catalog = json.load(fh)
     assert rd.load_catalog(os.path.join(root, "config", "routing.catalog.v2.json"))["schema_version"] == 2
     assert rd.catalog_candidates(disk_catalog, "codex-cli")[0]["id"] == "codex-luna-medium"
-    assert rd.host_auto_enabled(disk_catalog, "claude-code") is False
+    assert rd.host_auto_enabled(disk_catalog, "claude-code") is True
     assert rd.host_auto_enabled(disk_catalog, "codex-cli") is False
     try:
         rd.load_catalog(os.path.join(root, "config", "routing.default.json"))

@@ -7,7 +7,7 @@
   },
   "host_capabilities": {
     "claude-code": {
-      "pre_dispatch_apply": false
+      "pre_dispatch_apply": true
     },
     "codex-cli": {
       "pre_dispatch_apply": false

@@ -1,10 +1,10 @@
 # tier-guard v2 宿主兼容性状态
 
-> 更新：2026-09-12。状态只依据可复现证据；“插件已安装”“离线薄壳测试通过”均不等于真实自动路由可用。
+> 更新：2026-09-13。状态只依据可复现证据；“插件已安装”“离线薄壳测试通过”均不等于真实自动路由可用。
 
 | 宿主 / 运行时 | v2 路由建议 | v2 自动改写 | 证据与限制 |
 |---|---|---|---|
-| Claude Code CLI | 可离线验证 | **未在真实 v2 会话验证** | Claude 薄壳的 audit / auto / pin / fail-open 回归通过；历史 v1 有真实宿主记录，但不能外推为 v2。 |
+| Claude Code CLI 2.1.269 | **原生 audit 与低成本 auto 已验证** | **已验证（默认仍 audit）** | 官方 `--plugin-dir` 真实会话中，hook 收到可见 `Agent` 输入；临时受控 catalog 的 `applied=true` 由实际 `claude-haiku-4-5` 子代理回执确认。生产目录仅为 Claude 开放宿主能力闸门，`mode` 仍是 audit 且 auto 仍受质量门槛约束。 |
 | Claude Code Cloud | 未验证 | **未验证** | 插件形态避免依赖本地 settings；尚无 v2 云端子代理派发证据。 |
 | Codex CLI 0.153.4（历史） | v1 dry-run 已验证 | 仅 v1 历史证据 | 历史 smoke 证明该版本命中过 hook，但只验证了旧 T 档逻辑。 |
 | Codex CLI 0.150.1（历史复测） | 可离线验证 | **未验证** | 已安装 v2 快照并真实完成无 pin 子代理；没有新增 `PreToolUse` 日志，见 Task 7 记录。 |
@@ -14,13 +14,30 @@
 ## 默认与启用条件
 
 - 默认 `audit`：记录建议，不改写子代理参数。
-- 生产 catalog 的 `host_capabilities.*.pre_dispatch_apply` 当前全部为 `false`；因此即使进程临时
-  收到 `TIER_GUARD_MODE=auto`，未验证宿主仍只能写审计记录，不能输出 `updatedInput`。
+- 生产 catalog 已为真实验收通过的 Claude Code CLI 开放 `host_capabilities.claude-code.pre_dispatch_apply`；
+  Codex 仍为 `false`。这只是宿主能力闸门：默认 `mode=audit` 不会改写，`auto` 仍必须经过运行时质量门槛。
 - 不可仅因离线测试或界面上出现 “Spawned” 而切到持久 `auto`。
 - 对每个宿主版本，只有同时观察到：PreToolUse 审计记录、`applied: true`、目标参数和子代理实际执行回执时，才可将该宿主标为自动路由已验证。
 - 显式子代理 `model` 或 `reasoning_effort` 始终是 pin：即使未来某个宿主启用 auto，也只记录建议、不改写。
 - 对原生 Codex 的 `opaque_token`，即便临时受控目录打开 `pre_dispatch_apply`，hook 也不输出
   `updatedInput`；无明文语义时自动升档会同时伤害成本与可解释性。
+
+## 2026-09-13 Claude Code CLI 2.1.269：真实低成本 auto 回执
+
+Claude 官方文档将 `Agent` 列为可被 `PreToolUse` matcher 匹配的内建工具，并将 `--plugin-dir` 列为
+本地插件测试的正式入口。基于这两个契约，在隔离 Git 目录用 `--plugin-dir` 加载当前源码、唯一日志目录
+与临时 catalog 运行真实 Claude CLI；临时 catalog 只把 `claude-code.pre_dispatch_apply` 设为 `true`，
+生产 catalog 在测试期间没有修改。
+
+第一条未 pin 子代理确认 hook 可见 `Agent` 的任务文本并输出 `updatedInput`；实际 tool input 没有命中
+只读标记，故保守改写到 Opus，子代理 metadata 与转录均为 `claude-opus-5`。第二条明确包含只读标记的
+未 pin 子代理留下 `profile=auto`、`task_visibility=visible`、`target=claude-haiku`、`applied=true` 的审计，
+其 child metadata 是 `model=haiku`，实际转录模型为 `claude-haiku-4-5-20251001`，固定回执为
+`CLAUDE_TIER_GUARD_AUTO_HAIKU_OK`。父会话未被改变。
+
+因此 Claude 的 adapter 已证明可把可见任务的低成本选择实际送达 child；生产 catalog 现在只为该宿主打开
+pre-dispatch 能力闸门，仍默认 audit。该结果不外推到 Claude Code Cloud，亦不绕过 pin 或 auto 的质量门槛。
+完整受控记录见 [Claude CLI v2 smoke](2026-09-13-claude-cli-v2-smoke.md)。
 
 ## 上游需要提供的能力
 
