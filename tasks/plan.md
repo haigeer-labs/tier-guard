@@ -3,7 +3,7 @@
 ## Overview
 
 Publish tier-guard as a stable, default-audit `v0.1.1` release, then validate
-the released artifact in a fresh private GitHub project. The release must not
+the released artifact in a fresh public, non-production GitHub project. The release must not
 claim that Codex V2 hooks autonomously classify opaque child-task tokens; that
 upstream limitation remains explicit.
 
@@ -15,7 +15,8 @@ upstream limitation remains explicit.
 - Use the annotated Git tag `v0.1.1` as the immutable source of the published
   artifact and GitHub Release.
 - Exercise the released marketplace artifact in `haigeer-labs/tier-guard-e2e`,
-  a private disposable GitHub repository. Do not treat a developer checkout as
+  a public disposable GitHub repository containing no secrets or production
+  data. Do not treat a developer checkout as
   installation evidence.
 - The acceptance report distinguishes verified default-audit behavior and
   parent-agent plaintext pre-routing from the intentionally unavailable Codex
@@ -42,7 +43,7 @@ upstream limitation remains explicit.
 
 ### Phase 2: Publish
 
-- [ ] Task 3: Commit the release metadata, create and push annotated tag
+- [x] Task 3: Commit the release metadata, create and push annotated tag
   `v0.1.1`, then create a GitHub Release from that tag.
   - Acceptance: the remote branch and tag resolve to the release commit; the
     release notes communicate the audit-default and Codex V2 limitation.
@@ -51,14 +52,14 @@ upstream limitation remains explicit.
 
 ### Phase 3: Released-artifact acceptance
 
-- [ ] Task 4: Create the private `haigeer-labs/tier-guard-e2e` repository and
+- [x] Task 4: Create the public `haigeer-labs/tier-guard-e2e` repository and
   install tier-guard from the published marketplace source.
   - Acceptance: the installed cache is associated with `v0.1.1`, enabled, and
     its hook paths resolve inside the installed artifact.
   - Verification: `codex plugin list --json` plus installed-manifest and hook
     path inspection.
 
-- [ ] Task 5: Run an isolated real Codex TUI acceptance using the installed
+- [x] Task 5: Run an isolated real Codex TUI acceptance using the installed
   release and collect evidence for three parent-agent plaintext pre-routing
   tiers, audit logs, and pin protection.
   - Acceptance: real child receipts are `luna/medium`, `terra/high`, and
@@ -69,7 +70,7 @@ upstream limitation remains explicit.
 
 ### Checkpoint: Report and cleanup
 
-- [ ] Task 6: Write the final test report, including environment, cases,
+- [x] Task 6: Write the final test report, including environment, cases,
   evidence, verdict, and known upstream limitation.
   - Acceptance: every claimed pass is evidence-backed; unsupported automatic
     Codex-hook routing is marked out of scope rather than passed by inference.
