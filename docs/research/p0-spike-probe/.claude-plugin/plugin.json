@@ -1,0 +1,6 @@
+{
+  "name": "probe",
+  "version": "0.0.1",
+  "description": "P0 spike probe: observe PreToolUse/SubagentStart payloads",
+  "author": { "name": "spike" }
+}

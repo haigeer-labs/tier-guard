@@ -1,0 +1,12 @@
+{
+  "tracker": "none",
+  "initiative": {
+    "title": "tier-guard —— 按任务分级路由模型",
+    "issue": null,
+    "map": "spec/CAPABILITY-MAP.md"
+  },
+  "issueTypes": false,
+  "modules": {},
+  "activeModule": "tier-guard",
+  "updatedAt": "2026-09-11T16:50:11+00:00"
+}

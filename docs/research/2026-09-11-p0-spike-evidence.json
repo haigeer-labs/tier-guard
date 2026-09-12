@@ -1,0 +1,176 @@
+{
+  "recorded": "2026-09-11",
+  "purpose": "tier-guard P0 spike：实现前必须先验的五条前提",
+  "hosts": {
+    "claude_code_cli": "2.1.268",
+    "codex_cli": "codex-cli 0.153.4",
+    "codex_desktop": "ChatGPT.app 26.903.71938 内嵌 codex-cli 0.153.4（同版本）"
+  },
+  "method": "隔离脚手架，--plugin-dir 只为单次会话加载探针插件；不修改 ~/.claude/settings.json",
+  "probe_selftest": {
+    "positive": "喂 {tool_name:Agent} → 吐出 updatedInput",
+    "negative": "喂 {tool_name:Bash} → 不吐出任何东西",
+    "note": "第一版探针有 bug（python3 - <<EOF 占用 stdin，payload 读到空），实跑时发现并修复"
+  },
+  "Q1_matcher_and_tool_name": {
+    "verdict": "PASS",
+    "tool_name": "Agent"
+  },
+  "Q2_updatedInput_model_takes_effect": {
+    "verdict": "PASS",
+    "design": "差分：两次运行只差 hook 有没有改写"
+  },
+  "Q3_plugin_form_registers_pretooluse": {
+    "verdict": "PASS"
+  },
+  "Q4_codex_desktop_hook": {
+    "verdict": "NOT_RUN",
+    "reason": "Codex hook 需在新会话用 /hooks 人工审核信任，交互式，无法自动化",
+    "binary_evidence": "桌面版内嵌二进制与 CLI 同为 codex-cli 0.153.4，hook 符号计数逐项相同"
+  },
+  "Q5_codex_spawn_agent_override": {
+    "verdict": "NOT_APPLICABLE_IN_EXEC",
+    "finding": "codex exec（非交互）不暴露 spawn_agent",
+    "differential": "隔离 CODEX_HOME（multi_agent=true + expose_spawn_agent_model_overrides=true）与真实 CODEX_HOME 两次 exec，工具清单里都没有 spawn_agent"
+  },
+  "runs": {
+    "control_no_rewrite": {
+      "hook_events": [
+        {
+          "event": "PreToolUse",
+          "keys": [
+            "cwd",
+            "effort",
+            "hook_event_name",
+            "permission_mode",
+            "prompt_id",
+            "session_id",
+            "tool_input",
+            "tool_name",
+            "tool_use_id",
+            "transcript_path"
+          ],
+          "tool_name": "Agent",
+          "tool_input_keys": [
+            "description",
+            "prompt",
+            "run_in_background",
+            "subagent_type"
+          ],
+          "tool_input_model": null,
+          "session_effort": {
+            "level": "high"
+          }
+        },
+        {
+          "event": "SubagentStart",
+          "keys": [
+            "agent_id",
+            "agent_type",
+            "cwd",
+            "hook_event_name",
+            "prompt_id",
+            "session_id",
+            "transcript_path"
+          ]
+        },
+        {
+          "event": "SubagentStop",
+          "keys": [
+            "agent_id",
+            "agent_transcript_path",
+            "agent_type",
+            "background_tasks",
+            "cwd",
+            "effort",
+            "hook_event_name",
+            "last_assistant_message",
+            "permission_mode",
+            "prompt_id",
+            "session_crons",
+            "session_id",
+            "stop_hook_active",
+            "transcript_path"
+          ],
+          "has_agent_transcript_path": true,
+          "last_assistant_message": "probe ok"
+        }
+      ],
+      "agent_transcript_path": "/Users/vilin/.claude/projects/-private-tmp-claude-503--Users-vilin-Documents-gs-spec-guard-plugin-63755161-535f-4d49-8a9a-4decedfd28d8-scratchpad-spike-work/9453db24-46d8-4a20-a688-d2095fd076f3/subagents/agent-a56a007f3a119d56d.jsonl",
+      "subagent_models": {
+        "claude-sonnet-5": 1
+      }
+    },
+    "treatment_rewrite_to_haiku": {
+      "hook_events": [
+        {
+          "event": "PreToolUse",
+          "keys": [
+            "cwd",
+            "effort",
+            "hook_event_name",
+            "permission_mode",
+            "prompt_id",
+            "session_id",
+            "tool_input",
+            "tool_name",
+            "tool_use_id",
+            "transcript_path"
+          ],
+          "tool_name": "Agent",
+          "tool_input_keys": [
+            "description",
+            "prompt",
+            "run_in_background",
+            "subagent_type"
+          ],
+          "tool_input_model": null,
+          "session_effort": {
+            "level": "high"
+          }
+        },
+        {
+          "event": "SubagentStart",
+          "keys": [
+            "agent_id",
+            "agent_type",
+            "cwd",
+            "hook_event_name",
+            "prompt_id",
+            "session_id",
+            "transcript_path"
+          ]
+        },
+        {
+          "event": "SubagentStop",
+          "keys": [
+            "agent_id",
+            "agent_transcript_path",
+            "agent_type",
+            "background_tasks",
+            "cwd",
+            "hook_event_name",
+            "last_assistant_message",
+            "permission_mode",
+            "prompt_id",
+            "session_crons",
+            "session_id",
+            "stop_hook_active",
+            "transcript_path"
+          ],
+          "has_agent_transcript_path": true,
+          "last_assistant_message": "probe ok"
+        }
+      ],
+      "agent_transcript_path": "/Users/vilin/.claude/projects/-private-tmp-claude-503--Users-vilin-Documents-gs-spec-guard-plugin-63755161-535f-4d49-8a9a-4decedfd28d8-scratchpad-spike-work/62b2e890-1d67-4946-acf0-bbbd113fd50c/subagents/agent-a0d01d27b7b799478.jsonl",
+      "subagent_models": {
+        "claude-haiku-4-5-20251001": 2
+      }
+    }
+  },
+  "incidental_findings": [
+    "SubagentStop payload 自带 agent_transcript_path 与 last_assistant_message —— SPEC Open Question 1 的一手数据源",
+    "PreToolUse payload 带会话级 effort:{level:...}，可作为路由输入",
+    "Codex 的 updatedInput 必须与 permissionDecision:allow 同时出现，Claude 侧无此约束"
+  ]
+}

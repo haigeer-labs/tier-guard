@@ -1,0 +1,119 @@
+{
+  "schema_version": 2,
+  "mode": "audit",
+  "routing": {
+    "pin_policy": "respect",
+    "unknown_requirement": "conservative"
+  },
+  "host_capabilities": {
+    "claude-code": {
+      "pre_dispatch_apply": false
+    },
+    "codex-cli": {
+      "pre_dispatch_apply": false
+    }
+  },
+  "semantic_provider": {
+    "mode": "disabled"
+  },
+  "classification": {
+    "readonly_markers": [
+      "禁止修改任何文件",
+      "不要修改任何文件",
+      "只读代码",
+      "只读分析",
+      "只读审查",
+      "do not modify any file",
+      "read-only review",
+      "read-only task"
+    ],
+    "acceptance_markers": ["验收", "AC:", "AC：", "Acceptance"],
+    "irreversible_words": [
+      "git push",
+      "gh pr merge",
+      "rm -r",
+      "DROP TABLE",
+      "migrate",
+      "deploy",
+      "terraform apply",
+      "npm publish"
+    ],
+    "tradeoff_words": [
+      "选型",
+      "权衡",
+      "取舍",
+      "哪种方案",
+      "哪个方案",
+      "方案对比",
+      "比较方案",
+      "trade-off",
+      "tradeoff",
+      "which approach",
+      "pros and cons"
+    ],
+    "implementation_markers": [
+      "实现",
+      "implement"
+    ],
+    "bounded_scope_markers": [
+      "只动",
+      "only touch"
+    ]
+  },
+  "candidates": [
+    {
+      "id": "claude-haiku",
+      "host": "claude-code",
+      "model": "haiku",
+      "reasoning_effort": null,
+      "cost_rank": 1,
+      "auto_eligible": true,
+      "capabilities": ["mechanical", "read_only"]
+    },
+    {
+      "id": "claude-sonnet",
+      "host": "claude-code",
+      "model": "sonnet",
+      "reasoning_effort": null,
+      "cost_rank": 2,
+      "auto_eligible": true,
+      "capabilities": ["implementation", "bounded_change"]
+    },
+    {
+      "id": "claude-opus",
+      "host": "claude-code",
+      "model": "opus",
+      "reasoning_effort": null,
+      "cost_rank": 3,
+      "auto_eligible": true,
+      "capabilities": ["tradeoff", "cross_cutting"]
+    },
+    {
+      "id": "codex-luna-medium",
+      "host": "codex-cli",
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "medium",
+      "cost_rank": 1,
+      "auto_eligible": true,
+      "capabilities": ["mechanical", "read_only"]
+    },
+    {
+      "id": "codex-terra-high",
+      "host": "codex-cli",
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "high",
+      "cost_rank": 2,
+      "auto_eligible": true,
+      "capabilities": ["implementation", "bounded_change"]
+    },
+    {
+      "id": "codex-terra-xhigh",
+      "host": "codex-cli",
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "xhigh",
+      "cost_rank": 3,
+      "auto_eligible": true,
+      "capabilities": ["tradeoff", "cross_cutting"]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(?:Agent|spawn_agent|collaborationspawn_agent|collaboration[.:_]+spawn_agent)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash \"${PLUGIN_ROOT}/hooks/tier-guard-codex.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

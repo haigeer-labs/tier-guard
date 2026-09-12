@@ -1,0 +1,35 @@
+{
+  "mode": "dry-run",
+  "tiers": {
+    "T0": { "claude": "haiku",  "codex": { "model": "gpt-5.6-luna",  "effort": "medium" } },
+    "T1": { "claude": "sonnet", "codex": { "model": "gpt-5.6-terra", "effort": "high" } },
+    "T2": { "claude": "opus",   "codex": { "model": "gpt-5.6-terra", "effort": "xhigh" } }
+  },
+  "claude_families": { "haiku": "T0", "sonnet": "T1", "opus": "T2" },
+  "never_auto": {
+    "codex_models": ["gpt-6-astra", "gpt-5.6-sol"],
+    "codex_efforts": ["max", "ultra"]
+  },
+  "floor_rules": {
+    "R-IRREVERSIBLE": {
+      "words": ["git push", "git commit --amend", "gh pr merge", "gh issue create",
+                "gh issue delete", "gh release", "rm -r", "DROP TABLE", "migrate",
+                "deploy", "terraform apply", "npm publish", "--force", ".env",
+                "SECRET", "API_KEY"],
+      "mention_verbs": ["检查", "查找", "搜索", "有没有", "是否", "grep", "review"]
+    },
+    "R-AMBIGUOUS": {
+      "ac_markers": ["验收", "AC:", "AC：", "Acceptance"],
+      "readonly_markers": ["禁止修改任何文件", "不要修改任何文件", "不修改任何文件",
+                           "只读代码", "只读分析", "只读审查",
+                           "do not modify any file", "read-only review", "read-only task"]
+    },
+    "R-TRADEOFF": {
+      "words": ["选型", "权衡", "取舍", "哪种方案", "哪个方案", "方案对比", "比较方案",
+                "trade-off", "tradeoff", "which approach", "pros and cons"]
+    }
+  },
+  "benefit": { "min_prompt_chars": 150 },
+  "debounce": { "max_consecutive_failures": 2 },
+  "auto_gate": { "min_labeled_irreversible": 20, "max_false_positive_rate": 0.10, "min_t1_runs": 20 }
+}
