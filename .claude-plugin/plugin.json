@@ -1,6 +1,6 @@
 {
   "name": "tier-guard",
-  "version": "0.1.1+codex.20260913001001",
+  "version": "0.1.1",
   "description": "为未 pin 子代理按任务需求选择最低成本合格模型；主代理不换模型，默认 audit。",
   "author": {
     "name": "yizhongkaimail-collab"
