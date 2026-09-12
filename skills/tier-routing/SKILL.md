@@ -32,9 +32,11 @@ tier-guard 只在创建子代理时工作，绝不切换主代理的 `model` 或
 ## 宿主边界
 
 - 原生 Codex `collaboration.spawn_agent` 当前会在 hook 边界把 `message` 交付为不透明令牌；hook 无法安全地从中恢复任务语义。因此上面的**主代理明文预路由**是 Codex 的可用路径，hook 只负责审计与保护：遇到 `opaque_token` 时绝不擅自改写到高档。
-- Claude Code 与原生 Codex CLI：当前以 `audit` 为默认模式，记录建议而不改写。
+- Claude Code CLI 与原生 Codex CLI：当前都以 `audit` 为默认模式，记录建议而不改写。Claude Code CLI
+  `2.1.269` 已有真实 Haiku child 回执，故生产目录只为它开启宿主能力闸门；仍须显式进入 `auto`、通过
+  质量门槛且未 pin 才会改写。Codex CLI 与 Desktop 的能力闸门仍关闭。
 - `auto` 只在有真实宿主端到端质量证据后才可实际改写；目录中的
-  `host_capabilities.<host>.pre_dispatch_apply` 是不可由环境变量绕过的闸门，当前生产目录全关。
+  `host_capabilities.<host>.pre_dispatch_apply` 是不可由环境变量绕过的闸门。
   当前 mode 命令也会拒绝持久开启它。
 - Codex Desktop：在 26.908.40834 / 0.154.0-alpha.6.2 已端到端验证主代理明文预路由的三档实际派发：
   `luna / medium`、`terra / high`、`terra / xhigh`；每次同时留下 `opaque_token` 审计。仍无

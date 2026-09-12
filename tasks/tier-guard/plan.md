@@ -237,7 +237,7 @@ into a broad routing claim.
 ### Final checkpoint: v2 review
 
 - [ ] All plan acceptance criteria and repository validation pass.
-- [ ] A fresh reviewer verifies model selection can move down as well as up.
+- [x] A fresh reviewer verifies model selection can move down as well as up.
 - [ ] Real-host evidence exists for every claimed automatic host.
 - [ ] Semantic-provider network integration remains disabled unless separately approved.
 

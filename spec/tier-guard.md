@@ -57,7 +57,8 @@ tier-guard 负责给已决定创建的子任务选择执行配置。
 
 目录还必须为每个候选宿主声明 `host_capabilities.<host>.pre_dispatch_apply`。它是宿主版本的
 实测闸门，不是模型能力或用户 mode：只有它为 `true`，`auto` 才可以输出参数改写；否则仍记录
-相同决定但 `applied=false`。生产目录初始全部为 `false`，不能靠临时环境变量绕过。
+相同决定但 `applied=false`。生产目录默认保持 `audit`；能力闸门只在有对应真实端到端证据的宿主上
+开启，不能靠临时环境变量绕过。当前 Claude Code CLI 已开启，Codex CLI 与 Desktop 保持关闭。
 
 OpenAI 的公开描述可作为目录初始信息：Astra 面向最难的推理与编码，Terra 平衡能力与成本，
 Luna 面向成本敏感、高吞吐任务；实际路由阈值必须用本工作负载的结果校准。
@@ -150,7 +151,7 @@ tier-guard 不改变其只读边界。
 
 | Host | 当前合同 |
 |---|---|
-| Claude Code | 需要实际验证任务文本、pin 与 model 改写在派发前生效。 |
+| Claude Code CLI 2.1.269 | 已验证 `Agent` 的可见任务文本、pin 和 `updatedInput` 在派发前生效；明确只读的未 pin child 已实际以 Haiku 启动。生产目录为该宿主开启能力闸门，但默认 profile 仍为 audit，Cloud 不从此结论外推。 |
 | Codex CLI 0.154.0 | 已验证 `updatedInput` 在真实交互式子代理派发前被采纳，且不改变父代理；但原生 `collaboration.spawn_agent` 在 hook 边界交付不透明任务令牌，尚不能据此验证自动语义降档。生产目录仍保持建议式。 |
 | Codex Desktop | 已验证原生 `collaboration.spawn_agent` 进入 audit hook；尚未验证 `updatedInput` 被实际派发采纳，因此只能建议式，不可标为自动路由。 |
 | Codex Cloud | 独立验证；不从 CLI 或 Desktop 外推。 |

@@ -13,7 +13,7 @@
 - [x] Checkpoint · Local full validation
 - [ ] Task 7 · Codex CLI hook 独立的真实低成本子代理验证（阻塞：hook 输入为 `opaque_token`）
 - [x] Task 8 · 宿主兼容性与 Desktop 升级条件
-- [ ] Checkpoint · v2 review（阻塞：Task 7 仍等待上游提供任务明文或可信结构化信号。）
+- [ ] Checkpoint · v2 review（独立核心审查已完成；阻塞：Task 7 仍等待上游提供任务明文或可信结构化信号。）
 
 ## 待补宿主验收（不改变生产配置）
 
