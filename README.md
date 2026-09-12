@@ -51,6 +51,10 @@ Codex Multi-Agent V2 当前会在 hook 边界把子任务变为不透明令牌�
 /bin/bash scripts/validate.sh
 ```
 
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
+
 该命令覆盖路由合同、Claude/Codex adapter、模式与报告、审计和插件结构检查。
 
 真实 Codex CLI 的三档主代理预路由验收必须在 Terminal/TUI 中运行，不能用 `codex exec` 代替：
