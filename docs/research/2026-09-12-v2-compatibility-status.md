@@ -56,6 +56,13 @@ payload；单纯把明文缓存到本地、或派发后再读历史，都不能�
 解码或旁路缓存，继续采用主代理明文预路由 + hook 审计保护；这条上游证据支持设计选择，但不能替代
 本机各版本的端到端验收。
 
+同日对公开 `main` 源码的复核也排除了“更新 matcher 或插件配置即可恢复明文”的可能：
+[`communication_from_tool_message`](https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/handlers/multi_agents_v2.rs)
+只有运行时已标为 `DirectPlaintextMessage` 的调用才构造可读 `InterAgentCommunication`；其余路径直接调用
+`new_encrypted`。这个 source 分类发生在插件 hook 之外，插件不能通过 matcher、`updatedInput` 或 catalog
+把一个已加密的 V2 `message` 变为可信明文。故 Task 7 继续等待上游提供明文或与实际 child payload 绑定的
+可信结构化标签，而不是等待另一轮本地配置尝试。
+
 ## 2026-09-12 Desktop 明文预路由探针
 
 在 Desktop `0.154.0-alpha.6.2` 的当前会话中，主代理对一个“只读、禁止文件与工具操作、只回复固定
