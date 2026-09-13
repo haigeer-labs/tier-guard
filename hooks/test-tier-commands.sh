@@ -151,6 +151,51 @@ v2_no_token() { has "${V2REP}" "未观测" && ! has "${V2REP}" "token"; }
 check "v2 report：未观测到实际执行时明确写未知，不推算 token" \
   "$(yn v2_no_token)"
 
+# 实际执行只来自真 hook 在 SubagentStop 读到的子代理 transcript，严格按 tool_use_id 关联（不靠时间）。
+V2JOIN="${TMP}/v2-join"
+agentv2() {  # $1=tool_use_id
+  python3 -c 'import json,sys
+print(json.dumps({"session_id":"s","tool_use_id":sys.argv[1],"tool_name":"Agent","tool_input":{"description":"t","prompt":sys.argv[2],"subagent_type":"general-purpose"}},ensure_ascii=False))' "$1" "${V2SIMPLE}"
+}
+hookv2 "${V2JOIN}" audit agent "$(agentv2 u-seen)" >/dev/null
+hookv2 "${V2JOIN}" audit agent "$(agentv2 u-unseen)" >/dev/null
+SUBTR="${TMP}/v2-sub/agent-seen.jsonl"; mkdir -p "${TMP}/v2-sub"
+python3 - "${SUBTR}" <<'PY'
+import json, sys
+f = sys.argv[1]
+with open(f, "w", encoding="utf-8") as fh:
+    fh.write(json.dumps({"type": "user", "message": {"role": "user", "content": "x"}}) + "\n")
+    fh.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "model": "claude-haiku-4-5", "content": []}}) + "\n")
+json.dump({"toolUseId": "u-seen"}, open(f[:-len(".jsonl")] + ".meta.json", "w", encoding="utf-8"))
+PY
+hookv2 "${V2JOIN}" audit subagent-stop "$(python3 -c 'import json,sys; print(json.dumps({"session_id":"s","agent_transcript_path":sys.argv[1]}))' "${SUBTR}")" >/dev/null
+JOINREP="$(env -u TIER_GUARD_MODE HOME="${FAKEHOME}" python3 "${ROOT}/hooks/tier_report.py" --data "${V2JOIN}")"
+v2_join_seen() { has "${JOINREP}" "| claude-haiku-4-5 |"; }
+check "v2 report：按 tool_use_id 关联 SubagentStop，列出实际执行模型" "$(yn v2_join_seen)"
+v2_join_unseen() { has "${JOINREP}" "| 未观测 |" && has "${JOINREP}" "共 2 次"; }
+check "v2 report：未关联到的那条仍写未观测，stop 记录不计入路由次数" "$(yn v2_join_unseen)"
+
+# 真实宿主实测：SubagentStop 触发时，子代理唯一的 assistant 行可能还没落盘。报告须回读 transcript 补齐。
+V2LATE="${TMP}/v2-late"
+hookv2 "${V2LATE}" audit agent "$(agentv2 u-late)" >/dev/null
+LATETR="${TMP}/v2-sub/agent-late.jsonl"
+python3 - "${LATETR}" <<'PY'
+import json, sys
+f = sys.argv[1]
+with open(f, "w", encoding="utf-8") as fh:
+    fh.write(json.dumps({"type": "user", "message": {"role": "user", "content": "x"}}) + "\n")
+json.dump({"toolUseId": "u-late"}, open(f[:-len(".jsonl")] + ".meta.json", "w", encoding="utf-8"))
+PY
+hookv2 "${V2LATE}" audit subagent-stop "$(python3 -c 'import json,sys; print(json.dumps({"session_id":"s","agent_transcript_path":sys.argv[1]}))' "${LATETR}")" >/dev/null
+python3 - "${LATETR}" <<'PY'
+import json, sys
+with open(sys.argv[1], "a", encoding="utf-8") as fh:
+    fh.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "model": "claude-sonnet-5", "content": []}}) + "\n")
+PY
+LATEREP="$(env -u TIER_GUARD_MODE HOME="${FAKEHOME}" python3 "${ROOT}/hooks/tier_report.py" --data "${V2LATE}")"
+v2_late() { has "${LATEREP}" "| claude-sonnet-5 |" && ! has "${LATEREP}" "| 未观测 |"; }
+check "v2 report：SubagentStop 时 transcript 未落盘，报告回读后仍列出实际模型" "$(yn v2_late)"
+
 echo ""
 echo "  总计 ${PASS} 通过 / ${FAIL} 失败"
 [ "${PASS}" -gt 0 ] && [ "${FAIL}" -eq 0 ]

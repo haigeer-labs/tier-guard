@@ -8,7 +8,11 @@
   3. 按宿主编码输出。Codex 薄壳（Task 4b）的编码不同，不共用这份
 
 三个事件：
-  agent          PreToolUse(Agent)：路由。v2 stdout 只在 mode=auto 且未 pin、需要应用目标时有内容；
+  agent          PreToolUse(Agent)：路由 + 主代理预路由提醒（Task 10）。v2 stdout 在三种
+                 情况下有内容：mode=auto 且未 pin、需要应用目标时（updatedInput）；宿主
+                 `dispatch_nudge=true` 且未 pin 时的提醒（additionalContext，audit/auto 皆可能
+                 出现，可能与 updatedInput 合并在同一个 hookSpecificOutput 里）；auto 下同一
+                 session 第一次未 pin 派活的 deny（permissionDecision，此时绝不带 updatedInput）。
                  v1 raise 路径仅为兼容
   bash           PreToolUse(Bash) 且命令里有 codex-exec.sh：只记「建议 vs 实际」，任何
                  mode 下都不输出（Task 4a：提议式，绝不改用户批准过的派活命令）
@@ -141,17 +145,33 @@ def on_agent(payload, cfg, mode):
     return rec, out
 
 
+def _nudge_pin(ti, subagent_type, found, agent_model):
+    """主代理预路由提醒专用的 pin 判定，与上面路由用的 pinned 语义分开算：
+    True=能确认已 pin，False=能确认未 pin，None=判不出（插件 agent），永不提醒。"""
+    if ti.get("model"):
+        return True
+    if found and agent_model:
+        return True
+    if isinstance(subagent_type, str) and (subagent_type == "fork" or ":" in subagent_type):
+        return None
+    return False
+
+
 def on_agent_v2(payload, cfg, mode, catalog_identity):
     """把 Claude Agent 输入编码为 v2 RouteRequest。
 
     tool_input.model 和 agent frontmatter 的 model 都是用户已明确选择的 pin：记录推荐，
     但不改写。没有 pin 时，才由纯路由为本次子任务选择候选。
+
+    同一事件上还驱动主代理预路由提醒（nudge，Task 10）：判据全在 route_decide.nudge_decision，
+    这里只算 pin（与路由 pin 语义分开）、管每会话一次的 deny 标记、按宿主编码输出。
     """
     ti = payload.get("tool_input")
     if not isinstance(ti, dict):
         ti = {}
     prompt = ti.get("prompt") if isinstance(ti.get("prompt"), str) else ""
-    found, agent_model = resolve_agent_model(ti.get("subagent_type"), agent_dirs(payload))
+    subagent_type = ti.get("subagent_type")
+    found, agent_model = resolve_agent_model(subagent_type, agent_dirs(payload))
     pinned = bool(ti.get("model")) or bool(found and agent_model)
     request = {
         "task": prompt,
@@ -167,14 +187,37 @@ def on_agent_v2(payload, cfg, mode, catalog_identity):
     route_cfg["mode"] = mode
     d = rd.route(request, route_cfg)
     host_pre_dispatch_apply = rd.host_auto_enabled(cfg, "claude-code")
+
+    session_id = payload.get("session_id")
+    nudge_pin = _nudge_pin(ti, subagent_type, found, agent_model)
+    host_nudge_gate = rd.host_nudge_enabled(cfg, "claude-code")
+    already_denied = tier_state.nudge_already_denied(session_id)
+    n = rd.nudge_decision(mode, nudge_pin, host_nudge_gate, session_id, already_denied)
+    nudge_status, deny_reason, reminder_text = "none", None, None
+    if n["action"] == "deny":
+        if tier_state.claim_nudge_deny(session_id) == "created":
+            nudge_status, deny_reason = "denied", n["text"]
+        else:
+            # 并发抢输（别的 hook 已 deny）或标记写不进去：都只提醒，保证每会话至多 deny 一次、且不会死循环拦截。
+            nudge_status, reminder_text = "reminded", rd.NUDGE_REMIND_TEXT
+    elif n["action"] == "remind":
+        nudge_status, reminder_text = "reminded", n["text"]
+
     rec = _base_record("agent", payload, prompt)
-    rec.update(routing_version=2, subagent_type=ti.get("subagent_type"),
+    rec.update(routing_version=2, subagent_type=subagent_type,
                description=ti.get("description"), requested_model=ti.get("model"),
                agent_model=agent_model if found else "(未解析)",
                task_visibility=rd.task_visibility(prompt),
                transcript_path=payload.get("transcript_path"), decision=d,
                catalog_identity=catalog_identity, host_pre_dispatch_apply=host_pre_dispatch_apply,
-               applied=False)
+               nudge=nudge_status, applied=False)
+
+    if nudge_status == "denied":
+        # deny 压过下面的 updatedInput 改写：本次调用绝不应用路由目标。
+        return rec, {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                             "permissionDecision": "deny",
+                                             "permissionDecisionReason": deny_reason}}
+
     out = None
     target = d.get("target") or {}
     if (mode == "auto" and host_pre_dispatch_apply
@@ -184,6 +227,12 @@ def on_agent_v2(payload, cfg, mode, catalog_identity):
         new_ti["model"] = target["model"]
         out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": new_ti}}
         rec["applied"] = True
+
+    if nudge_status == "reminded":
+        if out is not None:
+            out["hookSpecificOutput"]["additionalContext"] = reminder_text
+        else:
+            out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": reminder_text}}
     return rec, out
 
 
@@ -250,6 +299,25 @@ def on_subagent_stop(payload, cfg, mode):
     return rec, None                               # 永不输出：SubagentStop 的输出能挡住子代理结束
 
 
+def on_subagent_stop_v2(payload):
+    """v2 实际执行记录：model 只取子代理 transcript 里宿主写下的值；宿主不给 effort 就记 None。
+
+    不做路由、不带 decision —— 报告按 tool_use_id 关联到 agent 记录。永不输出。
+    """
+    path = payload.get("agent_transcript_path")
+    if not isinstance(path, str) or not path:
+        raise ValueError("SubagentStop payload 缺 agent_transcript_path")
+    meta, prompt, model = subagent_facts(path)
+    rec = {"ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+           "event": "subagent-stop", "routing_version": 2, "session_id": payload.get("session_id"),
+           "tool_use_id": meta.get("toolUseId"), "agent_type": meta.get("agentType"),
+           "actual_execution": {"model": model, "reasoning_effort": None} if model else None,
+           # 实测：触发时子代理唯一的 assistant 行可能还没落盘；留路径给报告回读，不留内容
+           "agent_transcript_path": path,
+           "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest() if prompt else None}
+    return rec, None
+
+
 def main(argv):
     event = argv[0] if argv else "agent"
     raw = sys.stdin.read()
@@ -269,7 +337,9 @@ def main(argv):
                 raise rd.ConfigError(f"未知 v2 mode {mode!r}")
             if event == "agent":
                 rec, out = on_agent_v2(payload, cfg, mode, catalog_identity)
-            # Bash / SubagentStop 的 v2 审计记录由 Task 6 迁移；在此之前静默放行，
+            elif event == "subagent-stop" and mode != "off":
+                rec, out = on_subagent_stop_v2(payload)
+            # Bash 的 v2 审计记录尚未迁移；在此之前静默放行，
             # 绝不把 v1 解释器拿来误读 v2 目录。
         else:
             mode, _ = tier_state.read_mode(tier_state.data_dir(), cfg.get("mode"))

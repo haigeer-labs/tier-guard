@@ -125,6 +125,8 @@ def _check_catalog(cfg):
     for host, capabilities in host_capabilities.items():
         if not isinstance(capabilities, dict) or not isinstance(capabilities.get("pre_dispatch_apply"), bool):
             raise ConfigError(f"host_capabilities.{host}.pre_dispatch_apply 必须是布尔值")
+        if "dispatch_nudge" in capabilities and not isinstance(capabilities["dispatch_nudge"], bool):
+            raise ConfigError(f"host_capabilities.{host}.dispatch_nudge 必须是布尔值")
 
 
 def catalog_candidates(cfg, host):
@@ -138,6 +140,12 @@ def host_auto_enabled(cfg, host):
     """仅当该宿主已用真实派活证据验证可拦截，v2 auto 才允许实际改写参数。"""
     _check_catalog(cfg)
     return cfg["host_capabilities"].get(host, {}).get("pre_dispatch_apply", False)
+
+
+def host_nudge_enabled(cfg, host):
+    """仅当宿主已实测支持在 PreToolUse 注入提醒/deny，才允许输出主代理预路由提醒。"""
+    _check_catalog(cfg)
+    return cfg["host_capabilities"].get(host, {}).get("dispatch_nudge", False)
 
 
 _SIGNALS = {
@@ -287,6 +295,30 @@ def route(request, cfg):
     except Exception as exc:
         return {"action": "pass", "target": None, "recommended": None,
                 "confidence": "unknown", "fallback": f"{type(exc).__name__}: {exc}"}
+
+
+NUDGE_REMIND_TEXT = "tier-guard：创建未 pin 的子代理前，请先按 tier-routing skill 判断本次子任务所需能力，并在派活参数中显式传入候选目录里最低成本合格的 model（Codex 另传 reasoning_effort）。显式参数视为 pin，不会被改写。"
+NUDGE_DENY_TEXT = "tier-guard（auto）：本会话第一次未 pin 的派活已被拦下。请先加载 tier-routing skill，按本次子任务选择候选目录中最低成本合格的 model（Codex 另传 reasoning_effort），带上显式参数后重新派活；本会话之后不会再拦截。"
+
+
+def nudge_decision(profile, pinned, host_gate, session_id, already_denied):
+    """主代理预路由提醒的纯判据。只产出 action/text，宿主编码（deny 要不要配
+    permissionDecision 之类）留给薄壳；异常交给调用方按放行处理。"""
+    if profile not in ROUTING_PROFILES:
+        raise ValueError(f"未知 profile {profile!r}")
+    if profile == "off":
+        return {"action": "none", "text": None}
+    if host_gate is not True:
+        return {"action": "none", "text": None}
+    if pinned is not False:
+        # True（真 pin）或 None（插件 agent 判不出，比如 plugin:name）都不提醒。
+        return {"action": "none", "text": None}
+    if profile == "audit":
+        return {"action": "remind", "text": NUDGE_REMIND_TEXT}
+    # profile == "auto"：同一 session 第一次未 pin 派活 deny，之后只 remind。
+    if isinstance(session_id, str) and session_id and already_denied is not True:
+        return {"action": "deny", "text": NUDGE_DENY_TEXT}
+    return {"action": "remind", "text": NUDGE_REMIND_TEXT}
 
 
 def check_config(cfg):
@@ -693,6 +725,37 @@ def selftest():
     case("不变量：任何决策的档位都不低于起点",
          all(x["tier"] is None or x["start_tier"] is None or rank(x["tier"]) >= rank(x["start_tier"])
              for x in sweep))
+
+    # 主代理预路由提醒 nudge_decision
+    case("nudge：文本常量固定不变", NUDGE_REMIND_TEXT.startswith("tier-guard：") and NUDGE_DENY_TEXT.startswith("tier-guard（auto）："))
+    case("nudge：profile=off → none",
+         nudge_decision("off", False, True, "s1", False) == {"action": "none", "text": None})
+    case("nudge：host_gate=False → none",
+         nudge_decision("audit", False, False, "s1", False) == {"action": "none", "text": None})
+    case("nudge：host_gate=None（宿主未声明）→ none",
+         nudge_decision("audit", False, None, "s1", False) == {"action": "none", "text": None})
+    case("nudge：pinned=True → none",
+         nudge_decision("audit", True, True, "s1", False) == {"action": "none", "text": None})
+    case("nudge：pinned=None（插件 agent 判不出）→ none",
+         nudge_decision("audit", None, True, "s1", False) == {"action": "none", "text": None})
+    case("nudge：audit + 未 pin + 宿主支持 → remind",
+         nudge_decision("audit", False, True, "s1", False) == {"action": "remind", "text": NUDGE_REMIND_TEXT})
+    case("nudge：auto + 有 session_id + 本会话未 deny 过 → deny",
+         nudge_decision("auto", False, True, "s1", False) == {"action": "deny", "text": NUDGE_DENY_TEXT})
+    case("nudge：auto + 本会话已 deny 过 → remind",
+         nudge_decision("auto", False, True, "s1", True) == {"action": "remind", "text": NUDGE_REMIND_TEXT})
+    case("nudge：auto + session_id 为空串 → remind",
+         nudge_decision("auto", False, True, "", False) == {"action": "remind", "text": NUDGE_REMIND_TEXT})
+    case("nudge：auto + session_id 为 None → remind",
+         nudge_decision("auto", False, True, None, False) == {"action": "remind", "text": NUDGE_REMIND_TEXT})
+
+    def nudge_raises():
+        try:
+            nudge_decision("deny", False, True, "s1", False)
+        except ValueError:
+            return True
+        return False
+    case("nudge：未知 profile → 抛 ValueError（适配层失败即放行）", nudge_raises())
 
     print("")
     print(f"  总计 {len(ok)} 通过 / {len(bad)} 失败")

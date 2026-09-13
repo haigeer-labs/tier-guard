@@ -6,7 +6,10 @@
   2. 记日志（与 Claude 侧同一数据目录解析：tier_state.data_dir；不记 prompt 原文）
   3. 按 **Codex 的**编码输出 —— updatedInput 必须与 permissionDecision:"allow" 同时出现
      （spike 实测：否则报 `PreToolUse hook returned updatedInput without permissionDecision:allow`）。
-     Claude 侧不带 allow，所以两边的输出代码不共用。
+     Claude 侧不带 allow，所以两边的输出代码不共用。stdout 不只在 auto 改写参数时才有内容：
+     v2 还会在宿主 `dispatch_nudge=true` 时输出主代理预路由提醒（Task 11）——
+     audit/auto 下的 additionalContext（可能与 updatedInput 合并在同一个 hookSpecificOutput 里），
+     以及 auto 下同一 session 第一次未 pin 派活的 deny（此时绝不带 updatedInput）。
 
 旧 v1 兼容分支的起点档规则（默认 v2 不使用）：
   - model = 显式 tool_input.model，否则继承的会话 model（payload.model，Codex schema 必填）
@@ -47,6 +50,16 @@ def is_spawn_tool_name(tool_name):
     return isinstance(tool_name, str) and (
         tool_name in SPAWN_TOOL_NAMES or SPAWN_TOOL_NAME_RE.fullmatch(tool_name) is not None
     )
+
+
+def _codex_nudge_pin(ti):
+    """主代理预路由提醒专用的 pin 判定，与路由用的 pinned 语义分开算：True=已 pin，False=未 pin。
+
+    `fork_turns`（none / all / N）只决定子代理继承多少历史，与 pin 无关：真实 Codex 每次都带它，
+    且 rust-v0.154.0 spawn.rs 在区分 fork 模式之前就无条件应用 model / reasoning_effort 覆盖。"""
+    if ti.get("model") or ti.get("reasoning_effort"):
+        return True
+    return False
 
 
 def task_text(ti):
@@ -104,6 +117,12 @@ def on_spawn_v2(payload, cfg, mode, catalog_identity):
 
     父会话的 payload.model 是继承上下文，不等同于用户为这次子任务显式 pin 的参数；
     只有 tool_input 内出现 model 或 reasoning_effort 才禁止自动改写。
+
+    同一事件上还驱动主代理预路由提醒（nudge，Task 11）：判据全在
+    route_decide.nudge_decision，这里只算 pin（与路由 pin 语义分开、经 _codex_nudge_pin）、
+    管每会话一次的 deny 标记（与 Claude 薄壳共用 tier_state 的原子标记）、按 Codex 编码输出——
+    deny 只输出 permissionDecision/permissionDecisionReason，绝不带 updatedInput；
+    remind 的 additionalContext 可以与上面的路由 updatedInput 合并进同一个 hookSpecificOutput。
     """
     if not is_spawn_tool_name(payload.get("tool_name")):
         return None, None
@@ -122,14 +141,38 @@ def on_spawn_v2(payload, cfg, mode, catalog_identity):
     route_cfg["mode"] = mode
     d = rd.route({"task": text, "host": "codex-cli", "requested": requested, "signals": {}}, route_cfg)
     host_pre_dispatch_apply = rd.host_auto_enabled(cfg, "codex-cli")
+
+    session_id = payload.get("session_id")
+    nudge_pin = _codex_nudge_pin(ti)
+    host_nudge_gate = rd.host_nudge_enabled(cfg, "codex-cli")
+    already_denied = tier_state.nudge_already_denied(session_id)
+    n = rd.nudge_decision(mode, nudge_pin, host_nudge_gate, session_id, already_denied)
+    nudge_status, deny_reason, reminder_text = "none", None, None
+    if n["action"] == "deny":
+        if tier_state.claim_nudge_deny(session_id) == "created":
+            nudge_status, deny_reason = "denied", n["text"]
+        else:
+            # 并发抢输（别的 hook 已 deny）或标记写不进去：都只提醒，保证每会话至多 deny 一次、且不会死循环拦截。
+            nudge_status, reminder_text = "reminded", rd.NUDGE_REMIND_TEXT
+    elif n["action"] == "remind":
+        nudge_status, reminder_text = "reminded", n["text"]
+
     rec = {"ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
            "event": "codex-spawn", "routing_version": 2,
-           "session_id": payload.get("session_id"), "tool_use_id": payload.get("tool_use_id"),
+           "session_id": session_id, "tool_use_id": payload.get("tool_use_id"),
            "task_name": ti.get("task_name"), "text_source": source, "prompt_chars": len(text),
            "prompt_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
            "task_visibility": visibility,
            "catalog_identity": catalog_identity,
-           "decision": d, "host_pre_dispatch_apply": host_pre_dispatch_apply, "applied": False}
+           "decision": d, "host_pre_dispatch_apply": host_pre_dispatch_apply,
+           "nudge": nudge_status, "applied": False}
+
+    if nudge_status == "denied":
+        # deny 压过下面的 updatedInput 改写：本次调用绝不应用路由目标。
+        return rec, {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                             "permissionDecision": "deny",
+                                             "permissionDecisionReason": deny_reason}}
+
     out = None
     target = d.get("target") or {}
     if (mode == "auto" and host_pre_dispatch_apply
@@ -145,6 +188,12 @@ def on_spawn_v2(payload, cfg, mode, catalog_identity):
             "permissionDecisionReason": f"tier-guard: v2 选择 {target['id']}",
             "updatedInput": new_ti}}
         rec["applied"] = True
+
+    if nudge_status == "reminded":
+        if out is not None:
+            out["hookSpecificOutput"]["additionalContext"] = reminder_text
+        else:
+            out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": reminder_text}}
     return rec, out
 
 

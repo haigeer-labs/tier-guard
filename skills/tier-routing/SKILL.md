@@ -1,6 +1,6 @@
 ---
 name: tier-routing
-description: 为未 pin 的子代理按任务需求选择最低成本合格模型；仅在创建子代理前使用，不改变主代理模型。
+description: 调用 Claude Agent 工具或 Codex spawn_agent 创建任何子代理前触发：按任务从候选目录选最低成本合格 model（Codex 另传 reasoning_effort）并显式传入，不改主代理自身模型。
 ---
 
 # tier-routing：动态子代理模型路由

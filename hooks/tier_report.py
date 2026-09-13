@@ -24,6 +24,7 @@ import time
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import claude_hook  # noqa: E402  只借 transcript 读取，不借判据
 import route_decide as rd  # noqa: E402
 import tier_state  # noqa: E402
 
@@ -84,6 +85,18 @@ def _host_apply(value):
     return "未知"
 
 
+def _late_actual(stop):
+    """SubagentStop 触发时子代理唯一的 assistant 行可能还没落盘（2026-09-13 真实宿主实测）；报告时回读同一 transcript。"""
+    path = stop.get("agent_transcript_path")
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        _, _, model = claude_hook.subagent_facts(path)
+    except (OSError, ValueError):
+        return None
+    return {"model": model, "reasoning_effort": None} if model else None
+
+
 def _v2_audit(out, recs, recent):
     routes = _v2_routes(recs)
     out += ["", "### v2 路由审计", ""]
@@ -96,6 +109,13 @@ def _v2_audit(out, recs, recent):
     emitted = sum(bool(r.get("applied")) for r in routes)
     out.append(f"共 {len(routes)} 次：audit：{profiles['audit']} / auto：{profiles['auto']} / off：{profiles['off']}；"
                f"hook 已输出改写 {emitted}；pin {pinned}；fallback {actions['pass'] + actions['unsupported']}。")
+    # 实际执行只认 SubagentStop 从子代理 transcript 读到的值，严格按 tool_use_id 关联，不按时间或 prompt 猜。
+    stops = {}
+    for r in recs:
+        if r.get("event") == "subagent-stop" and r.get("tool_use_id"):
+            execution = r["actual_execution"] if isinstance(r.get("actual_execution"), dict) else _late_actual(r)
+            if execution:
+                stops[r["tool_use_id"]] = execution
     out += ["", "| 时间 | 宿主 | 宿主可改写 | 请求 | 选择 / 建议 | hook 改写输出 | 实际执行 | 动作 |",
             "|---|---|---|---|---|---|---|---|"]
     for r in routes[-recent:]:
@@ -103,7 +123,7 @@ def _v2_audit(out, recs, recent):
         selected = d.get("target") or d.get("recommended")
         emitted_target = d.get("target") if r.get("applied") else None
         # `applied` 是兼容字段：仅表示 adapter 输出了 updatedInput，绝非宿主实际执行回执。
-        execution = r.get("actual_execution") if isinstance(r.get("actual_execution"), dict) else None
+        execution = stops.get(r.get("tool_use_id"))
         out.append(f"| {r.get('ts', '?')} | {d.get('host') or '—'} | {_host_apply(r.get('host_pre_dispatch_apply'))} "
                    f"| {_pair(d.get('requested'))} | {_pair(selected)} | {_pair(emitted_target) if emitted_target else '未输出'} "
                    f"| {_pair(execution) if execution else '未观测'} | {d.get('action') or '—'} |")

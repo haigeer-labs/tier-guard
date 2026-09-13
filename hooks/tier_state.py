@@ -14,6 +14,7 @@ hook（claude_hook.py）、/tier-report、/tier-mode 共用这一份 —— 数�
   python3 hooks/tier_state.py show [--data DIR]
   python3 hooks/tier_state.py set <off|audit|auto> [--data DIR]
 """
+import hashlib
 import os
 import sys
 
@@ -27,6 +28,40 @@ V2_SETTABLE = ("off", "audit", "auto")
 def data_dir(explicit=None):
     return (explicit or os.environ.get("TIER_GUARD_LOG_DIR") or os.environ.get("CLAUDE_PLUGIN_DATA")
             or os.path.join(os.path.expanduser("~"), ".local", "state", "tier-guard"))
+
+
+def _nudge_marker_dir_and_digest(session_id):
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return os.path.join(data_dir(), "nudge-denied"), digest
+
+
+def nudge_already_denied(session_id):
+    if not isinstance(session_id, str) or not session_id:
+        return False
+    ddir, digest = _nudge_marker_dir_and_digest(session_id)
+    return os.path.isfile(os.path.join(ddir, digest))
+
+
+def claim_nudge_deny(session_id):
+    """原子地抢占本 session 的 deny 标记 → "created" / "exists" / "failed"。
+
+    只有 "created" 才能真 deny：同一轮并行派出的多个 Agent 会并发跑 hook，都读到「没 deny 过」，
+    O_EXCL 保证只有一个抢到；抢输的（"exists"）和写不进去的（"failed"）都只提醒 ——
+    否则一个会话会被拦多次，或因标记缺失而每次都拦。
+    """
+    ddir, digest = _nudge_marker_dir_and_digest(session_id)
+    try:
+        os.makedirs(ddir, mode=0o700, exist_ok=True)
+    except OSError:
+        return "failed"
+    try:
+        fd = os.open(os.path.join(ddir, digest), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+    except FileExistsError:
+        return "exists"
+    except OSError:
+        return "failed"
+    return "created"
 
 
 def read_mode(ddir, default, allowed=None):

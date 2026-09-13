@@ -6,8 +6,10 @@
 #   - 放行：异常 / 缺字段 / fork / python 不在 → 一律退出 0、stdout 空
 #   - dry-run 下**没有任何**返回 updatedInput 的路径（扫一遍，不是口头保证）
 #   - off 下与未装插件一致：stdout 空、退出 0、不留日志
-#   - auto 下 updatedInput 只改 model、其余字段原样，且永不出现 deny / ask
+#   - auto 下 updatedInput 只改 model、其余字段原样，路由路径永不出现 deny / ask（deny 只来自下面的 v2 提醒）
 #   - agent 定义解析（项目优先于用户目录）、Codex 派活「建议 vs 实际」
+#   - v2 主代理预路由提醒（Task 10）：宿主 dispatch_nudge 关闭时 audit 的 v2 stdout
+#     确实为空；开启后 audit 会输出 additionalContext，auto 每会话第一次未 pin 会 deny
 #   - 单次执行 < 100ms（实测中位数）
 # ─────────────────────────────────────────────────────────────
 set -uo pipefail
@@ -94,6 +96,52 @@ cfg.setdefault("host_capabilities", {}).setdefault("claude-code", {})["pre_dispa
 with open(sys.argv[2], "w", encoding="utf-8") as fh:
     json.dump(cfg, fh, ensure_ascii=False)
 PY
+
+# nudge 专用：从 v2 目录派生一份 dispatch_nudge=true 的副本，其余字段原样
+# （生产目录 claude-code.pre_dispatch_apply 已是 true，够测「deny 之后第二次带 updatedInput」）。
+V2_NUDGE_CONFIG="${TMP}/routing.catalog.v2.nudge.json"
+python3 - "${ROOT}/config/routing.catalog.v2.json" "${V2_NUDGE_CONFIG}" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+cfg.setdefault("host_capabilities", {}).setdefault("claude-code", {})["dispatch_nudge"] = True
+with open(sys.argv[2], "w", encoding="utf-8") as fh:
+    json.dump(cfg, fh, ensure_ascii=False)
+PY
+# nudge 测试用独立日志目录，别和上面 v2 断言的 LOGD 混在一起
+NLOGD="${TMP}/nudge-log"
+runnudgewith() {  # $1=profile $2=payload $3=config $4=logdir [$5=事件]
+  local profile="$1" payload="$2" config="$3" ld="$4" ev="${5:-agent}"
+  OUT="$(printf '%s' "${payload}" | env HOME="${FAKEHOME}" CLAUDE_PROJECT_DIR="${PROJ}" \
+          TIER_GUARD_LOG_DIR="${ld}" TIER_GUARD_MODE="${profile}" \
+          TIER_GUARD_CONFIG="${config}" /bin/bash "${HOOK}" "${ev}")"
+  RC=$?
+}
+runnudge()     { runnudgewith "$1" "$2" "${V2_NUDGE_CONFIG}"            "${NLOGD}" "${3:-agent}"; }
+runnudgeprod() { runnudgewith "$1" "$2" "${ROOT}/config/routing.catalog.v2.json" "${NLOGD}" "${3:-agent}"; }
+lastnudgelog() {  # $1=python 表达式（变量 r = NLOGD 最后一条日志）
+  python3 - "$1" "${NLOGD}/decisions.jsonl" <<'PY'
+import json, sys
+expr, path = sys.argv[1], sys.argv[2]
+try:
+    r = json.loads(open(path, encoding="utf-8").read().splitlines()[-1])
+    print("yes" if eval(expr) else "no")
+except Exception:
+    print("no")
+PY
+}
+mksess() {  # $1=session_id（- 表示不传该字段）$2=prompt $3=model（- 不传）$4=subagent_type
+  python3 - "$1" "$2" "$3" "$4" <<'PY'
+import json, sys
+sid, prompt, model, st = sys.argv[1:5]
+ti = {"description": "t", "prompt": prompt, "subagent_type": st, "run_in_background": False}
+if model != "-":
+    ti["model"] = model
+payload = {"tool_use_id": "u", "hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": ti}
+if sid != "-":
+    payload["session_id"] = sid
+print(json.dumps(payload, ensure_ascii=False))
+PY
+}
 
 PAD="背景：这是一段中性的背景说明，只用来让 prompt 越过收益门槛，不含任何判据词。背景：这是一段中性的背景说明，只用来让 prompt 越过收益门槛。背景：再补一句中性的说明文字，凑够长度。"
 AC=$'\n验收：python3 -m pytest 全绿\n'
@@ -235,6 +283,165 @@ runv2 auto '{"tool_name":"Agent","tool_input":{"subagent_type":"nomodel"}}'
 check "v2：缺 prompt → 退出 0、stdout 空且不应用" "$(yn [ "${RC}" -eq 0 -a -z "${OUT}" ])"
 check "v2：缺 prompt → fallback 可审计" \
   "$(lastlog 'r["routing_version"] == 2 and r["decision"]["action"] == "pass" and bool(r["decision"]["fallback"]) and r["applied"] is False')"
+
+# ── v2 SubagentStop：只记宿主 transcript 里的实际模型，永不输出 ──
+subtr() {  # $1=文件 $2=toolUseId $3=实际模型
+  mkdir -p "$(dirname "$1")"
+  python3 - "$@" <<'PY'
+import json, sys
+f, tid, model = sys.argv[1:4]
+with open(f, "w", encoding="utf-8") as fh:
+    fh.write(json.dumps({"type": "user", "message": {"role": "user", "content": "子任务原文 SECRET_PROMPT_TEXT"}}, ensure_ascii=False) + "\n")
+    fh.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "model": model,
+        "content": [{"type": "text", "text": "ok"}]}}) + "\n")
+json.dump({"agentType": "general-purpose", "toolUseId": tid}, open(f[:-len(".jsonl")] + ".meta.json", "w", encoding="utf-8"))
+PY
+}
+stopp() { python3 -c 'import json,sys; print(json.dumps({"session_id":"s","hook_event_name":"SubagentStop","agent_transcript_path":sys.argv[1],"last_assistant_message":"ok"}))' "$1"; }
+c_silent() { [ "${RC}" -eq 0 ] && [ -z "${OUT}" ]; }
+subtr "${TMP}/sub/agent-a.jsonl" u claude-haiku-4-5
+runv2 audit "$(stopp "${TMP}/sub/agent-a.jsonl")" subagent-stop
+check "v2 SubagentStop：退出 0、stdout 空" "$(yn c_silent)"
+check "v2 SubagentStop：按 meta 的 toolUseId 记录 transcript 里的实际模型，effort 未知即 None" \
+  "$(lastlog 'r["event"] == "subagent-stop" and r["routing_version"] == 2 and r["tool_use_id"] == "u" and r["actual_execution"] == {"model": "claude-haiku-4-5", "reasoning_effort": None}')"
+check "v2 SubagentStop：不记子任务原文、不伪造路由决策" \
+  "$(lastlog '"SECRET_PROMPT_TEXT" not in json.dumps(r, ensure_ascii=False) and "decision" not in r and len(r["prompt_sha256"]) == 64')"
+runv2 audit "$(stopp "${TMP}/sub/missing.jsonl")" subagent-stop
+check "v2 SubagentStop：transcript 不存在 → 退出 0、stdout 空" "$(yn c_silent)"
+check "v2 SubagentStop：transcript 不存在 → fallback 可审计" \
+  "$(lastlog 'r["event"] == "subagent-stop" and "FileNotFoundError" in r["fallback"]')"
+# env=off 会被薄壳快速路径拦下，这里走状态文件，才真正测到 python 这一侧
+OFFD="${TMP}/v2-off"; mkdir -p "${OFFD}"; printf 'off\n' > "${OFFD}/mode"
+printf '%s' "$(stopp "${TMP}/sub/agent-a.jsonl")" | env -u TIER_GUARD_MODE HOME="${FAKEHOME}" TIER_GUARD_LOG_DIR="${OFFD}" \
+  TIER_GUARD_CONFIG="${ROOT}/config/routing.catalog.v2.json" /bin/bash "${HOOK}" subagent-stop >/dev/null
+check "v2 SubagentStop：状态文件 off → 不留日志" "$(yn [ ! -e "${OFFD}/decisions.jsonl" ])"
+
+# ── v2 主代理预路由提醒（Task 10）：判据在 route_decide.nudge_decision，这里只测薄壳编码 ──
+nudgeq() {  # $1=python 表达式（变量 o=stdout JSON，rd=route_decide 模块）
+  python3 - "$1" "${OUT}" "${ROOT}/hooks" <<'PY'
+import json, sys
+sys.path.insert(0, sys.argv[3])
+import route_decide as rd  # noqa: F401
+try:
+    o = json.loads(sys.argv[2])
+    print("yes" if eval(sys.argv[1]) else "no")
+except Exception:
+    print("no")
+PY
+}
+NUDGE_TASK=$'只读审查配置，禁止修改任何文件。\n验收：报告所有键名。'
+
+rm -rf "${NLOGD}"
+runnudgeprod audit "$(mksess s0 "${NUDGE_TASK}" - nomodel)"
+check "nudge：生产目录 dispatch_nudge=false，audit + 未 pin → stdout 空" "$(yn [ "${RC}" -eq 0 -a -z "${OUT}" ])"
+check "nudge：生产目录 dispatch_nudge=false → 记 nudge=none" "$(lastnudgelog 'r["nudge"] == "none"')"
+
+runnudge audit "$(mksess s1 "${NUDGE_TASK}" - nomodel)"
+check "nudge：gate 开 + audit + 未 pin → stdout 只有 additionalContext（等于 route_decide 的常量）" \
+  "$(nudgeq 'o["hookSpecificOutput"]["hookEventName"] == "PreToolUse" and o["hookSpecificOutput"]["additionalContext"] == rd.NUDGE_REMIND_TEXT and "updatedInput" not in o["hookSpecificOutput"] and "permissionDecision" not in o["hookSpecificOutput"]')"
+check "nudge：audit 提醒记 nudge=reminded，applied=false" \
+  "$(lastnudgelog 'r["nudge"] == "reminded" and r["applied"] is False')"
+
+runnudge audit "$(mksess s2 "${NUDGE_TASK}" sonnet nomodel)"
+check "nudge：gate 开 + audit：显式 model 是 pin → stdout 空" "$(yn [ -z "${OUT}" ])"
+check "nudge：显式 model pin → 记 nudge=none" "$(lastnudgelog 'r["nudge"] == "none"')"
+runnudge audit "$(mksess s3 "${NUDGE_TASK}" - executor)"
+check "nudge：gate 开 + audit：agent frontmatter 的 model 是 pin → stdout 空" "$(yn [ -z "${OUT}" ])"
+check "nudge：frontmatter pin → 记 nudge=none" "$(lastnudgelog 'r["nudge"] == "none"')"
+runnudge audit "$(mksess s4 "${NUDGE_TASK}" - plugin:x)"
+check "nudge：gate 开 + audit：带冒号的插件 agent 判不出 pin → stdout 空" "$(yn [ -z "${OUT}" ])"
+check "nudge：插件 agent 判不出 → 记 nudge=none" "$(lastnudgelog 'r["nudge"] == "none"')"
+runnudge audit "$(mksess s5 "${NUDGE_TASK}" - fork)"
+check "nudge：gate 开 + audit：fork 判不出 pin → stdout 空" "$(yn [ -z "${OUT}" ])"
+check "nudge：fork → 记 nudge=none" "$(lastnudgelog 'r["nudge"] == "none"')"
+
+runnudge auto "$(mksess A "${NUDGE_TASK}" - nomodel)"
+check "nudge：gate 开 + auto + session A 第一次未 pin → deny（原因是 route_decide 的 deny 常量）" \
+  "$(nudgeq 'o["hookSpecificOutput"]["hookEventName"] == "PreToolUse" and o["hookSpecificOutput"]["permissionDecision"] == "deny" and o["hookSpecificOutput"]["permissionDecisionReason"] == rd.NUDGE_DENY_TEXT and "updatedInput" not in o["hookSpecificOutput"]')"
+check "nudge：deny 记 nudge=denied，applied=false" "$(lastnudgelog 'r["nudge"] == "denied" and r["applied"] is False')"
+
+runnudge auto "$(mksess A "${NUDGE_TASK}" - nomodel)"
+check "nudge：同一 session A 第二次未 pin → 不再 deny，updatedInput 与 additionalContext 同框" \
+  "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and o["hookSpecificOutput"]["updatedInput"]["model"] == "haiku" and o["hookSpecificOutput"]["additionalContext"] == rd.NUDGE_REMIND_TEXT')"
+check "nudge：session A 第二次记 nudge=reminded" "$(lastnudgelog 'r["nudge"] == "reminded"')"
+
+runnudge auto "$(mksess B "${NUDGE_TASK}" - nomodel)"
+check "nudge：不同 session B 第一次未 pin → 仍然 deny（按 session 各算一次）" \
+  "$(nudgeq 'o["hookSpecificOutput"]["permissionDecision"] == "deny"')"
+check "nudge：session B 第一次记 nudge=denied" "$(lastnudgelog 'r["nudge"] == "denied"')"
+
+runnudge auto "$(mksess - "${NUDGE_TASK}" - nomodel)"
+check "nudge：auto 但 payload 没 session_id → 只 remind，不 deny" \
+  "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and o["hookSpecificOutput"]["additionalContext"] == rd.NUDGE_REMIND_TEXT')"
+check "nudge：无 session_id → 记 nudge=reminded" "$(lastnudgelog 'r["nudge"] == "reminded"')"
+
+# env=off 会被薄壳快速路径拦下，这里走状态文件，才真正测到 python 这一侧
+NOFFD="${TMP}/nudge-off"; mkdir -p "${NOFFD}"; printf 'off\n' > "${NOFFD}/mode"
+OUT="$(printf '%s' "$(mksess C "${NUDGE_TASK}" - nomodel)" | env -u TIER_GUARD_MODE HOME="${FAKEHOME}" CLAUDE_PROJECT_DIR="${PROJ}" \
+        TIER_GUARD_LOG_DIR="${NOFFD}" TIER_GUARD_CONFIG="${V2_NUDGE_CONFIG}" /bin/bash "${HOOK}" agent)"; RC=$?
+check "nudge：状态文件 off → 退出 0、stdout 空" "$(yn [ "${RC}" -eq 0 -a -z "${OUT}" ])"
+check "nudge：状态文件 off → 不留日志" "$(yn [ ! -e "${NOFFD}/decisions.jsonl" ])"
+
+# ── deny 标记：目录名 64-hex，不含原始 session id，文件本身是空标记 ──
+check "nudge：deny 标记文件名都是 64 位十六进制，且不含原始 session id" \
+  "$(python3 - "${NLOGD}/nudge-denied" <<'PY'
+import os, re, sys
+d = sys.argv[1]
+names = os.listdir(d)
+raw_ids = ["A", "B"]
+ok = bool(names) and all(re.fullmatch(r"[0-9a-f]{64}", n) for n in names) \
+    and not any(rid in n for n in names for rid in raw_ids)
+print("yes" if ok else "no")
+PY
+)"
+check "nudge：deny 标记文件本身为空（只当存在性标记用）" \
+  "$(python3 - "${NLOGD}/nudge-denied" <<'PY'
+import os, sys
+d = sys.argv[1]
+print("yes" if all(os.path.getsize(os.path.join(d, n)) == 0 for n in os.listdir(d)) else "no")
+PY
+)"
+
+# ── 标记写不进去（nudge-denied 被占成普通文件）→ 降级成 remind，不能真 deny，退出仍是 0 ──
+NLOGD_FAIL="${TMP}/nudge-log-fail"; mkdir -p "${NLOGD_FAIL}"
+: > "${NLOGD_FAIL}/nudge-denied"
+runnudgewith auto "$(mksess D "${NUDGE_TASK}" - nomodel)" "${V2_NUDGE_CONFIG}" "${NLOGD_FAIL}"
+check "nudge：标记目录被占用 → 退出 0" "$(yn [ "${RC}" -eq 0 ])"
+check "nudge：标记写不进去 → 降级为 remind，不 deny" \
+  "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and o["hookSpecificOutput"]["additionalContext"] == rd.NUDGE_REMIND_TEXT')"
+
+# ── prompt 原文不出现在 remind / deny 的 stdout 或日志里 ──
+SECRET_TOKEN="NUDGE_SECRET_TOKEN_9f3a1c"
+out_lacks_token() { case "${OUT}" in *"${SECRET_TOKEN}"*) return 1 ;; esac; return 0; }
+runnudge audit "$(mksess se1 "只读检查一遍。${SECRET_TOKEN}" - nomodel)"
+check "nudge：remind 的 stdout 不含 prompt 原文" "$(yn out_lacks_token)"
+check "nudge：remind 的日志不含 prompt 原文" "$(lastnudgelog '"'"${SECRET_TOKEN}"'" not in json.dumps(r, ensure_ascii=False)')"
+runnudge auto "$(mksess se2 "只读检查一遍。${SECRET_TOKEN}" - nomodel)"
+check "nudge：deny 的 stdout 不含 prompt 原文" "$(yn out_lacks_token)"
+check "nudge：deny 的日志不含 prompt 原文" "$(lastnudgelog '"'"${SECRET_TOKEN}"'" not in json.dumps(r, ensure_ascii=False)')"
+
+# ── 并发：同一轮并行派出的多个 Agent 会并发跑 hook，都读到「没 deny 过」──
+# 用 python 把这个时序固定下来（已 deny 检查恒为 False），只有抢到 O_EXCL 标记的那次能 deny。
+NRACED="${TMP}/nudge-race"
+nudge_race() {
+  env HOME="${FAKEHOME}" CLAUDE_PROJECT_DIR="${PROJ}" TIER_GUARD_LOG_DIR="${NRACED}" \
+    python3 - "${ROOT}/hooks" "${V2_NUDGE_CONFIG}" "$(mksess R "${NUDGE_TASK}" - nomodel)" <<'PY'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import claude_hook as ch
+import route_decide as rd
+import tier_state
+cfg, sha = rd.load_config_with_fingerprint(sys.argv[2])
+payload = json.loads(sys.argv[3])
+tier_state.nudge_already_denied = lambda session_id: False
+outs = [ch.on_agent_v2(payload, cfg, "auto", {"origin": "environment", "sha256": sha})[1] for _ in range(3)]
+hso = [(o or {}).get("hookSpecificOutput", {}) for o in outs]
+denies = sum(1 for h in hso if h.get("permissionDecision") == "deny")
+reminds = sum(1 for h in hso if h.get("additionalContext") == rd.NUDGE_REMIND_TEXT and "permissionDecision" not in h)
+print("yes" if denies == 1 and reminds == 2 else "no")
+PY
+}
+check "nudge：并发抢标记 → 同一会话 3 次只有 1 次 deny，其余 2 次只提醒" "$(nudge_race)"
 
 # ── 性能：单次 < 100ms（实测中位数）──
 MS="$(python3 - "${HOOK}" "${IRR}" "${FAKEHOME}" "${LOGD}" <<'PY'

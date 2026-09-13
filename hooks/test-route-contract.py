@@ -55,6 +55,15 @@ def main():
     ]
     assert all(c["auto_eligible"] for c in candidates)
     assert rd.host_auto_enabled(CATALOG, "codex-cli") is False
+    assert rd.host_nudge_enabled(CATALOG, "codex-cli") is False  # nudge: 字段缺失默认 false
+
+    nudge_on = copy.deepcopy(CATALOG)
+    nudge_on["host_capabilities"]["codex-cli"]["dispatch_nudge"] = True
+    assert rd.host_nudge_enabled(nudge_on, "codex-cli") is True  # nudge: 显式 true 生效
+
+    bad_nudge = copy.deepcopy(CATALOG)
+    bad_nudge["host_capabilities"]["codex-cli"]["dispatch_nudge"] = "yes"
+    expect_error(bad_nudge, "dispatch_nudge")  # nudge: 非布尔值被拒
 
     verified = copy.deepcopy(CATALOG)
     verified["host_capabilities"]["codex-cli"]["pre_dispatch_apply"] = True
@@ -96,6 +105,11 @@ def main():
     assert rd.catalog_candidates(disk_catalog, "codex-cli")[0]["id"] == "codex-luna-medium"
     assert rd.host_auto_enabled(disk_catalog, "claude-code") is True
     assert rd.host_auto_enabled(disk_catalog, "codex-cli") is False
+    # nudge: 生产目录里每个已列出的宿主都显式声明 dispatch_nudge=false
+    assert disk_catalog["host_capabilities"], disk_catalog
+    for host, capabilities in disk_catalog["host_capabilities"].items():
+        assert capabilities.get("dispatch_nudge") is False, (host, capabilities)
+        assert rd.host_nudge_enabled(disk_catalog, host) is False, host
     try:
         rd.load_catalog(os.path.join(root, "config", "routing.default.json"))
     except rd.ConfigError as exc:

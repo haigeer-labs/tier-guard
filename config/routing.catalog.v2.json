@@ -7,10 +7,12 @@
   },
   "host_capabilities": {
     "claude-code": {
-      "pre_dispatch_apply": true
+      "pre_dispatch_apply": true,
+      "dispatch_nudge": false
     },
     "codex-cli": {
-      "pre_dispatch_apply": false
+      "pre_dispatch_apply": false,
+      "dispatch_nudge": false
     }
   },
   "semantic_provider": {
