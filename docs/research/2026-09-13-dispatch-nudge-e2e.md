@@ -194,3 +194,93 @@ child 不得使用工具，被测代码仍为 `56de0e1`）：
 
 恢复：两个会话已关闭，e2e 插件与 marketplace 已删除，空缓存目录已 `rmdir`；`config.toml` 先备份，再只删除本轮新增的
 e2e hook 信任表。
+
+## Task 12 真实宿主评估（2026-09-13 18:40 起）
+
+被测代码：`1432437`（提醒 / 拦截文本带候选目录摘要；`/tier-report` 带「主代理预路由提醒」统计）。
+每个宿主 4 个会话：1、2 为 audit，3、4 为 auto；每个会话派 3 个真正干活的子代理（机械只读 / 受限实现 / 取舍各一，
+题目各不相同，三类顺序在会话间轮换）。提示词为自然写法：不点名 skill，也不禁止 skill。门槛取自规约：
+提醒或拦截之后的同会话派活 ≥80% 显式传参；取舍类任务 0 次被降档；pin 的派活 0 次被提醒或拦截。
+
+### Claude Code CLI
+
+会话：`0a2f7f89-26aa-489a-9857-fd8cfef7fe81`（audit）、`09e10d65-40bc-4846-9d49-5297570bff12`（audit）、
+`c668f3b7-b907-4a00-89bc-fd2eb2017f97`（auto）、`c2622441-c2dd-4ff3-946f-d8bab91fd356`（auto）；`total_cost_usd` 合计约 1.36。
+
+合并 4 轮日志后的报告：
+
+```
+提醒 4 次 / 拦截 2 次 / 未触发 8 次（共 14 次派活）。
+提醒或拦截之后同会话派活 10 次，其中显式传参 8 次（8/10）。
+pin 的派活被提醒或拦截 0 次（应为 0）。
+```
+
+| 会话 | mode | 类别 | 目录档 | 实际 | 显式传参 | 取舍类高档 |
+|---|---|---|---|---|---|---|
+| 1 | audit | 机械 | haiku | sonnet | 否 |  |
+| 1 | audit | 实现 | sonnet | sonnet | 否 |  |
+| 1 | audit | 取舍 | opus | sonnet | 否 | ❌ |
+| 2 | audit | 取舍 | opus | sonnet | 否 | ❌ |
+| 2 | audit | 机械 | haiku | haiku | 是 |  |
+| 2 | audit | 实现 | sonnet | haiku | 是 |  |
+| 3 | auto | 实现 | sonnet | sonnet | 是 |  |
+| 3 | auto | 取舍 | opus | opus | 是 | ✅ |
+| 3 | auto | 机械 | haiku | haiku | 是 |  |
+| 4 | auto | 机械 | haiku | haiku | 是 |  |
+| 4 | auto | 取舍 | opus | opus | 是 | ✅ |
+| 4 | auto | 实现 | sonnet | sonnet | 是 |  |
+
+- **显式传参比例 8/10，恰好达到 80% 门槛；pin 被打扰 0 次。**
+- **取舍类 2/4 拿到高档，未达标。** auto 两轮全部正确；audit 两轮都没有。
+  - 会话 1：提醒送达但三次派活都没有显式传参，全部继承父模型 sonnet。
+  - 会话 2：取舍任务是会话里的第一次派活。audit 的提醒要在该次工具结果之后才送达，结构上无法影响第一次派活，
+    所以它只能继承父模型；之后两次派活显式传参，但受限实现选了 haiku，比目录低一档。
+- 结论：在 Claude 上，auto 的拦截能可靠地让取舍类任务拿到高档；audit 的提醒既可能被忽略，也对会话第一次派活无效。
+
+### Codex CLI
+
+快照 `tier-guard@tier-guard-e2e` `0.1.1+codex.20260913175121`（`codex_hook.py` `a0f1b0b1…`，目录 `1ccfb63d…`）；hook 信任仍先在
+只回复 `READY` 的会话里逐条核对后只信任 e2e 这一条。父线程：`01a09a5d-e986…`（audit）、`01a09a5d-f5e6…`（audit）、
+`01a09a5e-0059…`（auto）、`01a09a5e-0b82…`（auto）。原插件 0.1.1 的 hook 同时运行，统计只取目录指纹为 `1ccfb63d…` 的记录。
+
+合并 4 轮日志后的报告：
+
+```
+提醒 0 次 / 拦截 0 次 / 未触发 12 次（共 12 次派活）。
+提醒或拦截之后同会话派活：暂无样本。
+pin 的派活被提醒或拦截 0 次（应为 0）。
+```
+
+| 会话 | mode | 类别 | 目录档 | 实际（SQLite） | 显式传参 | 取舍类高档 |
+|---|---|---|---|---|---|---|
+| 1 | audit | 机械 | luna/medium | luna/medium | 是 |  |
+| 1 | audit | 实现 | terra/high | terra/high | 是 |  |
+| 1 | audit | 取舍 | terra/xhigh | terra/xhigh | 是 | ✅ |
+| 2 | audit | 取舍 | terra/xhigh | terra/xhigh | 是 | ✅ |
+| 2 | audit | 机械 | luna/medium | luna/medium | 是 |  |
+| 2 | audit | 实现 | terra/high | luna/medium | 是 |  |
+| 3 | auto | 实现 | terra/high | luna/medium | 是 |  |
+| 3 | auto | 取舍 | terra/xhigh | terra/xhigh | 是 | ✅ |
+| 3 | auto | 机械 | luna/medium | luna/medium | 是 |  |
+| 4 | auto | 机械 | luna/medium | luna/medium | 是 |  |
+| 4 | auto | 取舍 | terra/xhigh | terra/xhigh | 是 | ✅ |
+| 4 | auto | 实现 | terra/high | terra/high | 是 |  |
+
+- **自然使用下主代理自行预路由：12/12 次派活显式传参**，因此提醒和拦截一次都没有触发；「提醒之后 ≥80% 显式传参」这一项
+  没有样本，不是未达标。
+- **取舍类 4/4 拿到 `terra/xhigh`；pin 被打扰 0 次。**
+- 受限实现 2/4 为 `luna/medium`，比目录的 `terra/high` 低一档（与对照测试中的观察一致）。
+
+### 评估结论
+
+| 门槛 | Claude Code CLI | Codex CLI |
+|---|---|---|
+| 提醒或拦截之后 ≥80% 显式传参 | 8/10，达标（恰好） | 无样本（12/12 派活本来就显式传参） |
+| 取舍类任务 0 次被降档 | **2/4，未达标**（均在 audit：一次提醒被忽略，一次是会话第一次派活） | 4/4，达标 |
+| pin 的派活 0 次被提醒或拦截 | 0，达标 | 0，达标 |
+
+- Claude 在 auto 下三项全部符合；在 audit 下提醒不可靠，且结构上无法影响会话第一次派活。
+- Codex 在自然使用下已经依靠 skill 描述完成预路由，hook 的提醒与拦截在这批样本里没有被用到。
+- 两个宿主都出现过「受限实现选低一档」（Claude 1/4、Codex 2/4），规约的硬门槛不覆盖这一类。
+- 样本为每宿主 12 次派活，结论是初步的。按规约，Claude 不满足打开生产闸门的条件；是否只对 Codex 或只在 auto 下开启，
+  需要另行决定。

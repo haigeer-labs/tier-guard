@@ -30,12 +30,15 @@
   - [x] 区分 Codex 取舍类降档的原因：对照测试（child 真正做取舍分析，auto + 禁止 skill，每宿主 2 轮）中取舍类任务 4/4 次拿到高能力档
     （Claude opus ×2、Codex `terra/xhigh` ×2）；此前的降档来自「child 只回复固定文本」的测试设计，不需要加强文本约束。
     证据：[`dispatch nudge e2e`](../../docs/research/2026-09-13-dispatch-nudge-e2e.md)
-  - [ ] 观察：Codex 被拦后给受限实现任务选了 `luna/medium`（目录应为 `terra/high`，2/2 轮；Claude 为 sonnet）。不违反取舍类门槛，
-    留给 Task 12 的数据判断是否需要处理
+  - [ ] 观察：受限实现任务会选低一档——对照测试 Codex 2/2；Task 12 评估 Codex 2/4、Claude 1/4。不违反取舍类门槛，
+    是否需要处理待用户决定
   - [ ] Claude audit 提醒在真实宿主送达但未被采纳（1 轮、提醒后 2 次派活）。2026-09-13 用户确认：不改 audit 语义，
     留到 Task 12 用每宿主 ≥10 次自然派活的数据再决定
 - [ ] Task 12 · 报告与自然触发真实宿主评估（每宿主 ≥10 次，开闸门前再确认）
   - [x] `/tier-report` 新增「主代理预路由提醒」统计：提醒 / 拦截 / 未触发次数、提醒后同会话显式传参比例、pin 被打扰次数
+  - [x] 真实宿主评估（2026-09-13，每宿主 4 会话 12 次派活）：Claude 显式传参 8/10、取舍类 2/4（audit 未达标）、pin 0；
+    Codex 自然预路由 12/12（提醒指标无样本）、取舍类 4/4、pin 0。证据：[`dispatch nudge e2e`](../../docs/research/2026-09-13-dispatch-nudge-e2e.md)
+  - [ ] 开闸门决定：Claude 按规约不满足；是否仅对 Codex、或仅在 auto 下开启需要用户决定（开闸门前再确认）
 
 ## 待补宿主验收（不改变生产配置）
 
