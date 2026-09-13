@@ -21,6 +21,9 @@
 - 即使临时设 `TIER_GUARD_MODE=auto`，也只有 catalog 中已实测的
   `host_capabilities.<host>.pre_dispatch_apply=true` 才能实际改写；当前生产目录全为 `false`
 - 不可逆、取舍、跨模块或信息不足不能被路由到低能力候选
+- 主代理预路由提醒（2026-09-13 用户确认）：宿主 `dispatch_nudge=true` 时，audit 对未 pin 派活只输出
+  `additionalContext` 提醒、不改参数；auto 每个会话只 deny 第一次未 pin 派活（标记写不进去就降级为提醒）。
+  pin、`plugin:name`、fork、off、闸门关闭一律不提醒；生产目录闸门全为 `false`，开启前先问
 - Codex Desktop 已观察到协作派活进入审计 hook；但未验证 `updatedInput` 被宿主采纳，仍只能建议，不能标成自动路由
 
 ## 命令

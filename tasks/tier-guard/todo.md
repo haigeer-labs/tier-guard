@@ -15,6 +15,17 @@
 - [x] Task 8 · 宿主兼容性与 Desktop 升级条件
 - [ ] Checkpoint · v2 review（独立核心审查已完成；阻塞：Task 7 仍等待上游提供任务明文或可信结构化信号。）
 
+- [x] Task 9 · 提醒判据契约、`dispatch_nudge` 宿主闸门与 tier-routing 触发描述
+- [x] Task 10 · Claude adapter 提醒（audit 注入提醒 / auto 每会话 deny 一次）
+- [x] Task 11 · Codex adapter 提醒（遵守 Codex 0.154.0 输出约束）
+  - [x] 真实宿主缺陷：Codex 原生 `spawn_agent` 每次都带 `fork_turns`（`"all"` / `"none"`），被 `_codex_nudge_pin`
+    当成「判不出 pin」，提醒与 deny 在真实 Codex 上永不触发。已按 rust-v0.154.0 源码确认 `fork_turns` 与 pin 无关并修复
+    （单测先红后绿、变异体抓到、validate 通过）。证据：[`dispatch nudge e2e`](../../docs/research/2026-09-13-dispatch-nudge-e2e.md)
+  - [x] 修复后在真实 Codex CLI 上复测提醒 / deny：宿主采纳提醒上下文与 deny + 原因，主代理带显式参数重派
+  - [ ] 风险：deny 后主代理不加载 skill 时自行降档（复测中三个 child 均为不在目录里的 `luna/low`，含取舍类任务）。
+    需决定是否把候选目录要点写进提醒 / deny 文本
+- [ ] Task 12 · 报告与自然触发真实宿主评估（每宿主 ≥10 次，开闸门前再确认）
+
 ## 待补宿主验收（不改变生产配置）
 
 - [x] Codex CLI 主代理明文预路由：在真实交互式 Terminal/TUI 中复现 Desktop 的三档 child 回执。
@@ -26,6 +37,13 @@
 - [x] Claude Code CLI v2：真实 `PreToolUse` audit 与受控 auto 都已验证；明确只读的未 pin child
   实际回执为 `claude-haiku-4-5-20251001`。生产仍默认 audit，Cloud 未外推。详见
   [`Claude CLI v2 smoke`](../../docs/research/2026-09-13-claude-cli-v2-smoke.md)。
+
+- [ ] Claude Code CLI v2 完整端到端验收（A/B/C/D，报告自动记录实际执行）。2026-09-13 首轮未通过：
+  v2 跳过 `SubagentStop`，且当轮 mode 实为 audit。工作树修复后以 `--plugin-dir` 复测：点名 tier-routing 的
+  主代理预路由三档实际为 haiku / sonnet / opus，报告实际执行三条全部入账。详见
+  [`Claude CLI v2 e2e`](../../docs/research/2026-09-13-claude-cli-v2-e2e.md)。
+- [ ] 自然触发：不点名 tier-routing 时主代理自行选择子代理模型。2026-09-13 Claude CLI 与 Codex CLI 均未通过——
+  主代理都没有加载 skill，三个子代理全部继承父代理参数。详见同一文档。
 
 ## 上游前置条件（不在本插件内绕过）
 

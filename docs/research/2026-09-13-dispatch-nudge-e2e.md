@@ -1,0 +1,116 @@
+# 主代理预路由提醒：真实宿主端到端（Task 10 / 11）
+
+> 运行：2026-09-13 15:46–15:54 +0800
+>
+> 宿主：Claude Code CLI `2.1.270`（`claude -p`）；Codex CLI `0.154.0`（tmux 交互式 TUI）
+>
+> 被测：工作树（Task 9–11 已验收）。Claude 经 `--plugin-dir` 加载；Codex 装临时快照
+> `tier-guard@tier-guard-e2e` `0.1.1+codex.20260913154558`（目录指纹 `1ccfb63d…`，`codex_hook.py`
+> 与工作树同为 `51b964d1…`）。生产目录未改，两个宿主的 `dispatch_nudge` 只在临时目录里为 `true`。
+
+## 方法
+
+- 提示词与 [`Claude CLI v2 e2e`](2026-09-13-claude-cli-v2-e2e.md) 的「自然」版相同：三件事（核对逗号分隔项、写
+  `add(a, b)`、比较生产库 schema 变更的风险/成本/回滚），不出现 tier-routing、模型、成本或类别词；child
+  一律禁止工具、只回复固定文本。
+- 判据只用 hook 日志、父会话转录 / rollout、Claude 子代理转录和 Codex `state_5.sqlite` 回执，不看模型自述。
+- Claude：父模型 `sonnet`，临时目录 `claude-code.dispatch_nudge=true`（指纹 `66206321…`），已安装的 0.1.1
+  经 `--settings` 停用。
+- Codex：父模型 `gpt-5.6-terra / high`；hook 审核页逐条核对来源与命令路径后，只信任
+  `tier-guard@tier-guard-e2e` 这一条。
+
+## Claude Code CLI
+
+| 场景 | session | 派活（按顺序） | hook `nudge` | 实际模型 |
+|---|---|---|---|---|
+| audit | `8bac593f-2c5f-415c-8e5a-bbe4ec2dcd62` | 3 次均未传 model | reminded ×3 | 3 个都是 `claude-sonnet-5`（继承） |
+| auto | `cf7aa8d1-bcfa-408c-9b61-925d1ee8aed9` | ① 未传 model → **被拦**；② 调用 `Skill(tier-guard:tier-routing)`；③④⑤ 显式 `haiku` / `sonnet` / `opus` | denied ×1，之后 none ×3（pin） | `claude-haiku-4-5-20251001` / `claude-sonnet-5` / `claude-opus-5` |
+
+- **audit 提醒：送达但未被采纳。** 父转录里有 3 条 `hook_additional_context` 附件（与每次派活同一时刻），
+  所以宿主确实把提醒送进了主代理上下文；但提醒后的第 2、3 次派活仍然没有显式传 model。
+- **auto 拦截：通过。** 被拦那次的工具结果即 deny 常量原文；主代理随即加载 tier-routing，重派三档全部显式、
+  实际模型一致，同一会话之后没有再被拦。
+- 新的 skill 描述（Task 9）在 Claude 自然使用下没有触发 skill 加载（audit 场景 0 次）。
+
+## Codex CLI：自然使用下主代理已自行预路由
+
+| 轮次 | 父线程 | child 实际参数（SQLite） | 原插件 hook | e2e hook |
+|---|---|---|---|---|
+| 信任前（作废，见下） | `01a099bd-299c-7f53-9d01-c25872582f6f` | `luna/medium`、`luna/medium`、`terra/xhigh` | 3 条，pinned | 未信任，未运行 |
+| audit | `01a099c0-5f91-7ba0-a2c6-c0985ad8d989` | `luna/medium`、`luna/medium`、`terra/xhigh` | 3 条，pinned | 3 条，`nudge=none`（pin） |
+| auto | `01a099c0-6eb8-79c3-8952-fdae450dd829` | `luna/medium`、`luna/medium`、`terra/xhigh` | 3 条，pinned | 3 条，`nudge=none`（pin） |
+
+- 三轮里主代理都在派活前读取了 tier-routing（TUI 显示 `Read SKILL.md (tier-guard:tier-routing skill)`；rollout 里
+  出现的 skill 路径指向 e2e 快照），9/9 次派活显式传了 model 与 reasoning_effort；取舍类的 C 均为
+  `terra/xhigh`，没有被降档。对照：同一提示词在 12:38（只有旧描述的 0.1.1 插件）三个 child 全部继承
+  `terra/high`。旧描述在这几轮的 rollout 里仍然可见，所以「新描述触发」是强关联而非唯一归因。
+- 因为每次派活都已 pin，e2e hook 正确地不提醒、不拦截；**Codex 的提醒 / deny 编码在这三轮里没有被触发**，
+  其宿主采纳情况需另测。
+
+## 偏差：`-c` 没有停用原插件的 hook
+
+测试以 `-c 'plugins."tier-guard@tier-guard".enabled=false'` 启动，意在只让 e2e hook 生效。实际上原插件
+`tier-guard@tier-guard` 0.1.1 的 hook 照常运行（hook 审核页显示其为 Trusted、Active；日志里目录指纹
+`fec0067b…`、没有 `nudge` 字段的记录就是它写的）。因此：
+
+- 第一轮在 e2e hook 被信任之前就开始派活，只有原插件 hook 运行，该轮不计入 hook 结论；
+- 之后各轮两份 hook 都运行，按目录指纹与 `nudge` 字段区分记录。原插件在 audit 下不输出，不影响提醒 / deny。
+
+## Codex：禁止使用 skill 的对照（15:53–15:55）
+
+为触发 Codex 的提醒 / deny 路径，在同一自然提示词前加一句「不要读取、加载或使用任何 skill」，再各跑一轮：
+
+| 场景 | 父线程 | 主代理行为 | child 实际参数 | e2e hook |
+|---|---|---|---|---|
+| audit | `01a099c2-7566-7130-8d2d-3c10d698981a` | 仍读取 tier-routing，3 次显式传参（`fork_turns: "none"`） | `luna/medium`、`luna/medium`、`terra/xhigh` | `pinned=True`，`nudge=none` ×3 |
+| auto | `01a099c2-80cb-7e81-80ba-8884a7e9fb3a` | 未读取 skill，3 次都**没有**传 model / effort（`fork_turns: "all"`） | 3 个都是 `terra/high`（继承） | `pinned=False`，但 `nudge=none` ×3——**应为第一次 deny、之后提醒** |
+
+两轮 rollout 里 `Tool call blocked by PreToolUse hook`、deny 文本、提醒文本出现次数都为 0；spawn_agent 参数只取键名与
+非正文字段核对，没有读取 message 原文。
+
+## 缺陷：Codex adapter 把原生 `fork_turns` 当成「判不出 pin」
+
+`hooks/codex_hook.py` 的 `_codex_nudge_pin` 规定：任何取值为真的 `fork_*` 参数 → 返回 `None`（判不出，永不提醒）。
+真实 Codex 0.154.0 的原生 `spawn_agent` **每次都带 `fork_turns`**，取值是字符串 `"all"` 或 `"none"`，两者都为真，
+所以在真实宿主上提醒和 deny 永远不会触发。单元测试没有发现，是因为测试夹具按假设构造了「无 fork 参数」的输入，
+而不是按真实宿主的参数形状。修复前需先确认 `fork_turns` 的语义以及它能否与 model / effort 同时传入，
+否则提醒会把主代理引向一个宿主不接受的调用。
+
+**源码确认（`openai/codex` tag `rust-v0.154.0`，`codex-rs/core/src/tools/handlers/multi_agents_v2/spawn.rs`）：**
+
+- `SpawnAgentArgs::fork_mode`（约第 290–325 行）：`fork_turns` 取值只能是 `none` / `all` / 正整数字符串，
+  缺省或空串按 `all`；`fork_context` 在 V2 中一律报错 `fork_context is not supported in MultiAgentV2; use fork_turns instead`。
+- `handle_spawn_agent`（约第 127–135 行）：`apply_requested_spawn_agent_model_overrides` 在区分 fork 模式之前无条件执行，
+  所以显式 `model` / `reasoning_effort` 对 `none`、`all`、`N` 都生效；没有针对 fork 的拒绝或忽略。
+- 未显式传参时，子代理继承父代理当前的 model 与 effort——与 auto 对照轮 SQLite 回执的 `terra/high` 一致。
+
+因此 `fork_turns` 与是否 pin 无关：修复是去掉「带 `fork_*` 即判不出」这条规则，按普通未 pin 派活处理。
+
+**修复（工作树，尚未在真实 Codex 上复测）：** `_codex_nudge_pin` 只看显式 `model` / `reasoning_effort`。
+`hooks/test-tier-guard-codex.sh` 把旧的「带 fork 不提醒」断言换成真实形状 `fork_turns: "all"`：audit 提醒、auto 新会话
+deny——修复前 3 条失败（77 / 3），修复后 80 / 0；`scripts/mutation-check.py` 用「重新引入 fork 规则」替换旧变异体并被抓到，
+`--only nudge` 符合预期 19 / 不符 0 / 锚点失效 0；`scripts/validate.sh` 退出码 0。
+
+## 修复后复测（16:11–16:14）
+
+快照 `tier-guard@tier-guard-e2e` `0.1.1+codex.20260913161142`：`codex_hook.py` 指纹 `b5bb53e8…` 与修复后的工作树一致，
+目录指纹仍为 `1ccfb63d…`。hook 文件内容未变，沿用已有信任，没有出现审核页。提示词与上面「禁止使用 skill」对照轮相同。
+
+| 场景 | 父线程 | e2e hook | 父 rollout | child 实际参数（SQLite） |
+|---|---|---|---|---|
+| audit | `01a099d3-79a0-7931-b915-564080093ce3` | `pinned=False`，`nudge=reminded` ×3 | 提醒文本 3 次；无 deny | 3 个都是 `terra/high`（继承） |
+| auto | `01a099d3-835d-7ce2-bb1f-bacad8cd4145` | 第 1 次 `denied`，之后 3 次 `pinned=True`、`nudge=none` | `Tool call blocked by PreToolUse hook` 1 次，deny 文本 1 次；TUI 显示 `Blocked by hook` 与 deny 原文 | 3 个都是 `luna/low`（显式） |
+
+- **宿主采纳：通过。** Codex 0.154.0 接受了只带 `additionalContext` 的提醒输出，并把文本送进主代理上下文；接受了
+  deny + 非空原因，拦下本次派活并把原因展示给主代理；主代理随后带显式参数重派，同一会话没有再被拦。
+- audit 场景主代理没有按提醒显式传参；该轮提示词禁止使用 skill，与提醒要求冲突，不能据此判断提醒在自然使用下的效果。
+- **新风险：deny 后不加载 skill 会降档。** auto 轮主代理遵守了「不用 skill」，没有读取候选目录，就给三个 child 都传了
+  `gpt-5.6-luna / low`：该组合不在生产候选目录中，且 C 是取舍类任务，违反「取舍类任务 0 次被降档」。
+  deny 原因只要求加载 skill、本身不含候选目录，是这一问题的直接原因。
+
+## 恢复
+
+`codex plugin remove tier-guard@tier-guard-e2e` 与 `codex plugin marketplace remove tier-guard-e2e` 已执行：
+`codex plugin list` 只剩 `tier-guard@tier-guard 0.1.1`（已安装、已启用），其缓存目录指纹仍为 `fec0067b…`。
+`plugin remove` 留下的空目录 `~/.codex/plugins/cache/tier-guard-e2e` 已用 `rmdir` 删除；`config.toml` 里
+`tier-guard@tier-guard-e2e` 的 hook 信任条目仍有残留（未手改配置，待确认后清理）。

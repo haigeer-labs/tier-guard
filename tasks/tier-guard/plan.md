@@ -19,6 +19,8 @@ hook 编码的证据，但**不构成 v2 的完成项**。本计划完成前，�
 - agent-skills 是可选、显式的上下文 provider；spec-guard 仅是本仓开发流程，不是运行时依赖。
 - semantic provider 先只定义受约束接口和“未配置”行为；不在本计划中联网、取凭据或发送任务原文。
 - hook adapter 必须在真实派发前改写参数才能启用 auto；Codex Desktop 已验证主代理明文预路由的三档实际派发，但 hook 因接收不透明令牌仍保持 advisory。
+- 2026-09-13 用户确认：自然使用时主代理不会自发加载 tier-routing，因此由派活事件驱动主代理显式预路由——audit 注入提醒（改变“audit 下 stdout 为空”的旧契约）、auto 每个会话 deny 一次；hook 仍不做语义判断。
+- 提醒与 deny 受 `host_capabilities.<host>.dispatch_nudge` 实测闸门控制，默认全部 `false`；判定逻辑只放在 `hooks/route_decide.py`。
 
 ## Dependency graph
 
@@ -232,6 +234,82 @@ into a broad routing claim.
 
 **Dependencies:** Tasks 6 and 7.
 **Files likely touched:** `commands/tier_doctor.md`, `hooks/tier_doctor.py`, `docs/research/`, `skills/tier-routing/SKILL.md`.
+**Estimated scope:** M.
+
+### Phase 5: Main-agent pre-routing nudge
+
+#### Task 9: Nudge contract, catalog gate and skill trigger
+
+**Description:** Add the pure nudge decision (`none` / `remind` / `deny`) and the `dispatch_nudge` host gate, and rewrite the tier-routing skill description so it names every subagent creation as its trigger.
+
+**Acceptance criteria:**
+
+- [x] `dispatch_nudge` is optional per host (absent = `false`, keeping older v2 catalogs usable); a non-boolean value is a catalog error; production catalog sets it explicitly `false` for every host.
+- [x] The nudge decision depends only on mode, pin, host gate and whether this session was already denied; selftest covers each branch.
+- [x] Reminder and deny reason text contain no task text.
+- [x] `skills/tier-routing/SKILL.md` description triggers on creating any subagent/child agent; skill-sync check stays green.
+
+**Verification:**
+
+- [x] `python3 -B hooks/route_decide.py --selftest`, `python3 -B hooks/test-route-contract.py` and `/bin/bash scripts/validate.sh` pass.
+
+**Dependencies:** None.
+**Files likely touched:** `hooks/route_decide.py`, `config/routing.catalog.v2.json`, `hooks/test-route-contract.py`, `skills/tier-routing/SKILL.md`.
+**Estimated scope:** M.
+
+#### Task 10: Claude adapter nudge
+
+**Description:** Encode the nudge decision for Claude PreToolUse(`Agent`): `additionalContext` for reminders, `permissionDecision: "deny"` with reason for the once-per-session auto block.
+
+**Acceptance criteria:**
+
+- [x] audit + unpinned + gate open → allow, reminder context, no `updatedInput`, no deny.
+- [x] auto → first unpinned call per session is denied with a reason; later unpinned calls keep the existing apply behavior and add the reminder.
+- [x] pin, frontmatter pin, `plugin:name` agents, `off`, closed gate, missing `session_id` and any exception → no reminder, no deny.
+- [x] Audit records carry `nudge`; per-session deny state lives only in the data directory.
+
+**Verification:**
+
+- [x] `hooks/test-tier-guard.sh` covers every branch; new assertions are killed in `scripts/mutation-check.py`; `CLAUDE.md` hard rules match the new audit contract.
+
+**Dependencies:** Task 9.
+**Files likely touched:** `hooks/claude_hook.py`, `hooks/test-tier-guard.sh`, `scripts/mutation-check.py`, `CLAUDE.md`.
+**Estimated scope:** M.
+
+#### Task 11: Codex adapter nudge
+
+**Description:** Encode the same decision for Codex PreToolUse(`spawn_agent`) under Codex's output rules: deny requires a non-empty reason, `ask` is unsupported, `updatedInput` still requires `allow`.
+
+**Acceptance criteria:**
+
+- [x] Same branch coverage as Task 10, including `opaque_token` inputs.
+- [x] No output combination Codex 0.154.0 rejects (`ask`, empty deny reason, `updatedInput` without `allow`).
+
+**Verification:**
+
+- [x] `hooks/test-tier-guard-codex.sh` covers every branch; new assertions are killed in `scripts/mutation-check.py`.
+
+**Dependencies:** Task 9; review after Task 10.
+**Files likely touched:** `hooks/codex_hook.py`, `hooks/test-tier-guard-codex.sh`, `scripts/mutation-check.py`.
+**Estimated scope:** M.
+
+#### Task 12: Report and natural-trigger real-host evaluation
+
+**Description:** Report nudge outcomes and measure whether nudged main agents pass explicit parameters in natural use on each host.
+
+**Acceptance criteria:**
+
+- [ ] `/tier-report` shows counts of `none` / `reminded` / `denied` and the share of later unpinned-session dispatches that passed an explicit model.
+- [ ] Claude Code CLI and Codex CLI each reach the spec thresholds over ≥10 natural dispatches, with 0 tradeoff tasks lowered and 0 pinned calls nudged.
+- [ ] Evidence is recorded in `docs/research/` without raw task text.
+- [ ] `dispatch_nudge` is opened only for hosts with that evidence, after explicit user confirmation.
+
+**Verification:**
+
+- [ ] `hooks/test-tier-commands.sh` covers the new report section; real-host protocol documented and reproducible.
+
+**Dependencies:** Tasks 10 and 11.
+**Files likely touched:** `hooks/tier_report.py`, `hooks/test-tier-commands.sh`, `docs/research/`, `config/routing.catalog.v2.json`.
 **Estimated scope:** M.
 
 ### Final checkpoint: v2 review

@@ -2,6 +2,8 @@
 
 > 状态：**核心定位已于 2026-09-12 确认**。本文件取代旧的“默认 T2、只升不降”方向；
 > 本地实现与回归已完成，宿主自动改写能力仍以兼容性记录中的真实端到端证据为准。
+>
+> 2026-09-13 增补「主代理预路由提醒」（用户已确认 audit 提醒与 auto 每会话一次 deny；待评审后实施）。
 
 ## Objective
 
@@ -19,6 +21,9 @@ tier-guard 负责给已决定创建的子任务选择执行配置。
 - 每条决定可审计：输入特征来源、目标档、置信度、实际传入参数和最终可观察结果。
 - 未安装 agent-skills 或 spec-guard 时，核心路由功能仍可运行。
 - 任何宿主只有在派发前实际接收并应用参数改写时，才能被标为“自动路由已验证”。
+- 自然使用（用户不点名 tier-routing）时，主代理在未 pin 派活上被提醒后显式选择参数：每个宿主至少 10 次
+  自然派活评估中，同一会话第二次及以后的未 pin 派活有 ≥80% 显式传入 model（Codex 另含 effort），
+  取舍类任务 0 次被降档，pin 的派活 0 次被提醒或拦截。
 
 ## Boundaries
 
@@ -59,6 +64,11 @@ tier-guard 负责给已决定创建的子任务选择执行配置。
 实测闸门，不是模型能力或用户 mode：只有它为 `true`，`auto` 才可以输出参数改写；否则仍记录
 相同决定但 `applied=false`。生产目录默认保持 `audit`；能力闸门只在有对应真实端到端证据的宿主上
 开启，不能靠临时环境变量绕过。当前 Claude Code CLI 已开启，Codex CLI 与 Desktop 保持关闭。
+
+目录同时为每个宿主声明 `host_capabilities.<host>.dispatch_nudge`：只有宿主已实测支持在
+PreToolUse 注入提醒上下文、且 deny 附原因会让主代理带参重派时才为 `true`；为 `false` 时不提醒、不 deny。
+Claude Code CLI 2.1.270 的官方文档与 Codex CLI 0.154.0 的源码（tag `rust-v0.154.0`）已确认两种输出存在，
+但仍须真实宿主实测后才开启；Codex Desktop 保持 `false`。
 
 OpenAI 的公开描述可作为目录初始信息：Astra 面向最难的推理与编码，Terra 平衡能力与成本，
 Luna 面向成本敏感、高吞吐任务；实际路由阈值必须用本工作负载的结果校准。
@@ -118,6 +128,21 @@ core 把它记为 `unavailable` 并按无上下文处理，不会让路由失败
 未 pin 且没有可识别起点时，v2 仍按任务做 `select`，因为它的职责就是为这次新派活选择候选；这不是继承主代理模型的改写。
 显式 pin 即使不在候选目录中也绝不改写；audit 可记 `select` 及 `recommended`，但 `target=null`、`applied=false`。
 
+### 主代理预路由提醒
+
+2026-09-13 实测：点名 tier-routing 时 Claude 与 Codex 主代理都能显式选对三档；不点名时两者都不加载 skill，
+子代理全部继承父代理参数（证据：[`Claude CLI v2 e2e`](../docs/research/2026-09-13-claude-cli-v2-e2e.md)）。
+因此插件在**子代理创建事件**上驱动主代理自己做预路由，hook 不做语义判断：
+
+- 触发条件：未 pin 的派活（PreToolUse `Agent` / `spawn_agent`），且宿主 `dispatch_nudge=true`。pin 的判定同上；
+  无法解析是否 pin 的插件 agent（`plugin:name`）不提醒。
+- `audit`：放行派活、不改参数，输出一条提醒上下文，要求主代理按 tier-routing 为之后的派活显式传参。
+  两个宿主都在当前工具结果之后送达，所以提醒只影响后续派活。
+- `auto`：同一 `session_id` 内第一次未 pin 派活返回 deny 并附原因，要求显式传参后重派；此后的未 pin 派活
+  放行（能力闸门允许时照旧应用 `updatedInput`）并附提醒。没有 `session_id` 时不 deny。
+- 提醒与 deny 原因只引用 tier-routing 与候选目录，不包含任务原文。
+- 任何异常一律放行、stdout 为空，日志写明 fallback 路径；审计记录新增 `nudge`：`none` / `reminded` / `denied`。
+
 语义裁判只能输出受 schema 约束的任务类型、所需能力、复杂度和置信度；它不能直接输出任意
 模型 ID，也不能绕过硬约束和候选目录。当前目录的 `semantic_provider.mode` 固定为 `disabled`：
 没有 provider 实现、网络请求、凭据读取或任务文本外发；改变该模式需要单独用户授权和新版本契约。
@@ -127,8 +152,8 @@ core 把它记为 `unavailable` 并按无上下文处理，不会让路由失败
 | Profile | 行为 |
 |---|---|
 | `off` | 不分类、不记录、不改写。 |
-| `audit` | 计算并记录建议，不改写；显式 pin 也保留方向性 action，但 `target=null`。 |
-| `auto` | 对未 pin 请求应用决定；仅限已验证的 host adapter。 |
+| `audit` | 计算并记录建议，不改写参数；显式 pin 也保留方向性 action，但 `target=null`。未 pin 派活且 `dispatch_nudge=true` 时注入提醒。 |
+| `auto` | 每个会话第一次未 pin 派活 deny 一次，要求显式传参；之后对未 pin 请求应用决定（仅限已验证的 host adapter）并附提醒。 |
 
 `semantic` 不是独立 mode，而是 `audit` 或 `auto` 下的可选 classifier provider。默认关闭；
 没有 provider 时，灰区任务以 `unknown` 处理并保守路由。
@@ -182,3 +207,6 @@ adapter 已输出 `updatedInput`，不等于宿主接收或子代理实际执行
 - pin、低置信度、provider 不可用、host 不支持改写分别有可验证的行为。
 - agent-skills/spec-guard 缺失或停用不会使 core 失败。
 - 各宿主的“建议 / 自动 / 未支持”状态有独立端到端证据。
+- 提醒与 deny 只出现在未 pin 的子代理创建事件；pin、`off`、宿主闸门关闭、无 `session_id`、异常分别有
+  可验证的“不提醒 / 不 deny”行为；deny 每个会话至多一次。
+- 自然触发评估在 Claude Code CLI 与 Codex CLI 上各自达到 Success criteria 的阈值，并有独立端到端证据。
