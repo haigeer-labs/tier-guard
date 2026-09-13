@@ -284,3 +284,93 @@ pin 的派活被提醒或拦截 0 次（应为 0）。
 - 两个宿主都出现过「受限实现选低一档」（Claude 1/4、Codex 2/4），规约的硬门槛不覆盖这一类。
 - 样本为每宿主 12 次派活，结论是初步的。按规约，Claude 不满足打开生产闸门的条件；是否只对 Codex 或只在 auto 下开启，
   需要另行决定。
+
+## Task 15 guard 复评（2026-09-13 23:26 起）
+
+被测代码：提交 `39108b5`（默认 profile 为 `guard`：每会话第一次未 pin 派活 deny 一次、之后提醒，从不改写参数）。
+协议与 Task 12 相同——同一批 8 个自然提示词与任务顺序，唯一差别是 4 个会话全部为 `guard`。
+
+### Claude Code CLI
+
+会话：`6c4e2661-3054-462b-b87e-af92d406f1ce`、`b645320f-ec74-43b5-a650-fd78d0338f89`、`706298c5-54f1-41c7-8eba-06a59ceefeea`、
+`4a71e3fb-e0bf-41f1-a977-1da271a7f18d`；`--plugin-dir` 加载工作树，临时目录 `claude-code.dispatch_nudge=true`（指纹 `f5a5a607…`）；
+`total_cost_usd` 合计约 1.55。
+
+合并 4 轮日志后的报告：
+
+```
+提醒 0 次 / 拦截 4 次 / 未触发 12 次（共 16 次派活）。
+提醒或拦截之后同会话派活 12 次，其中显式传参 12 次（12/12）。
+pin 的派活被提醒或拦截 0 次（应为 0）。
+```
+
+| 会话 | 类别 | 目录档 | 实际 | 显式传参 | 取舍类高档 |
+|---|---|---|---|---|---|
+| 1 | 机械 | haiku | haiku | 是 |  |
+| 1 | 实现 | sonnet | sonnet | 是 |  |
+| 1 | 取舍 | opus | opus | 是 | ✅ |
+| 2 | 取舍 | opus | opus | 是 | ✅ |
+| 2 | 机械 | haiku | haiku | 是 |  |
+| 2 | 实现 | sonnet | sonnet | 是 |  |
+| 3 | 实现 | sonnet | haiku | 是 |  |
+| 3 | 取舍 | opus | opus | 是 | ✅ |
+| 3 | 机械 | haiku | haiku | 是 |  |
+| 4 | 机械 | haiku | haiku | 是 |  |
+| 4 | 取舍 | opus | opus | 是 | ✅ |
+| 4 | 实现 | sonnet | sonnet | 是 |  |
+
+- **三项门槛全部达标**：显式传参 12/12，取舍类 4/4 拿到 opus，pin 被打扰 0 次。
+- 对照 Task 12（audit / auto 各半）：取舍类从 2/4 提升到 4/4，显式传参从 8/10 提升到 12/12。
+  每个会话的第一次派活都被拦下后带参重派，audit 下「第一次派活无法被提醒影响」的结构性缺口不再出现。
+- 受限实现 1/4 选了 haiku（低一档），与此前观察一致，不在门槛内。
+
+### Codex CLI
+
+快照 `tier-guard@tier-guard-e2e` `0.1.1+codex.20260913232558`（目录默认 `mode: guard`，指纹 `9c2092d0…`；`codex_hook.py` `a0f1b0b1…`
+与工作树一致）。hook 信任仍先在只回复 `READY` 的会话里逐条核对后只信任 e2e 这一条。父线程：`01a09b73-cd19…`、`01a09b73-d89a…`、
+`01a09b73-e47f…`、`01a09b73-f247…`。原插件 0.1.1 的 hook 同时运行，统计只取目录指纹为 `9c2092d0…` 的记录。
+
+合并 4 轮日志后的报告：
+
+```
+提醒 0 次 / 拦截 0 次 / 未触发 12 次（共 12 次派活）。
+提醒或拦截之后同会话派活：暂无样本。
+pin 的派活被提醒或拦截 0 次（应为 0）。
+```
+
+| 会话 | 类别 | 目录档 | 实际（SQLite） | 显式传参 | 取舍类高档 |
+|---|---|---|---|---|---|
+| 1 | 机械 | luna/medium | luna/medium | 是 |  |
+| 1 | 实现 | terra/high | terra/high | 是 |  |
+| 1 | 取舍 | terra/xhigh | terra/xhigh | 是 | ✅ |
+| 2 | 取舍 | terra/xhigh | terra/xhigh | 是 | ✅ |
+| 2 | 机械 | luna/medium | luna/medium | 是 |  |
+| 2 | 实现 | terra/high | luna/medium | 是 |  |
+| 3 | 实现 | terra/high | luna/medium | 是 |  |
+| 3 | 取舍 | terra/xhigh | **luna/medium** | 是 | ❌ |
+| 3 | 机械 | luna/medium | luna/medium | 是 |  |
+| 4 | 机械 | luna/medium | luna/medium | 是 |  |
+| 4 | 取舍 | terra/xhigh | terra/xhigh | 是 | ✅ |
+| 4 | 实现 | terra/high | luna/medium | 是 |  |
+
+- 主代理在自然使用下 12/12 次派活都自行显式传参，guard 的拦截与提醒一次都没有触发；「提醒之后 ≥80%」无样本。
+- **取舍类 3/4，未达标。** 会话 3 的取舍任务被主代理显式分到 `luna/medium`；显式参数按规约是 pin，guard 不拦截、不改写，
+  这次降档来自主代理自身的选档，而不是 hook 放过了未 pin 派活。Task 12 同一提示词下 Codex 为 4/4，说明存在运行间波动。
+- 受限实现 3/4 为 `luna/medium`（低一档），比 Task 12（2/4）更频繁。
+- pin 被打扰 0 次。
+
+恢复：4 个会话已关闭，e2e 插件与 marketplace 已删除，空缓存目录已 `rmdir`；`config.toml` 先备份，再只删除本轮新增的
+e2e hook 信任表。
+
+### Task 15 结论
+
+| 门槛 | Claude Code CLI（guard） | Codex CLI（guard） |
+|---|---|---|
+| 提醒或拦截之后 ≥80% 显式传参 | 12/12，达标 | 无样本（主代理 12/12 自行显式传参） |
+| 取舍类任务 0 次被降档 | 4/4，达标 | **3/4，未达标**（主代理显式选错档，hook 按 pin 语义不干预） |
+| pin 的派活 0 次被提醒或拦截 | 0，达标 | 0，达标 |
+
+- guard 解决了 Claude 在 audit 下暴露的两个缺口（提醒被忽略、第一次派活无法影响），Claude 三项全部达标。
+- Codex 的未达标不在 hook 的作用范围内：主代理已经在派活前显式选择，guard 按规约尊重显式参数。要改善它，需要作用于
+  主代理的选档本身（例如 skill 文本或候选目录描述），而不是 hook 的拦截强度。
+- 每宿主 12 次派活，结论仍是初步的。

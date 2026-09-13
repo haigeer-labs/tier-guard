@@ -43,6 +43,10 @@
 - [x] Task 13 · guard profile：核心判据、状态持久化与默认目录
 - [x] Task 14 · guard 在两个适配层、报告与命令 / skill / README / CLAUDE.md 文案中落地
 - [ ] Task 15 · guard 下真实宿主复评并决定是否开闸门（开闸门前再确认）
+  - [x] guard 复评（2026-09-13，提交 `39108b5`，每宿主 4 会话）：Claude 显式传参 12/12、取舍类 4/4、pin 0（达标）；
+    Codex 主代理 12/12 自行显式传参（拦截 / 提醒未触发）、取舍类 3/4（主代理显式选错档，未达标）、pin 0。
+    证据：[`dispatch nudge e2e`](../../docs/research/2026-09-13-dispatch-nudge-e2e.md)
+  - [ ] 开闸门决定：Claude 达标；Codex 取舍类未达标且问题在主代理自身选档（hook 不干预显式参数）。待用户决定
 
 ## 待补宿主验收（不改变生产配置）
 

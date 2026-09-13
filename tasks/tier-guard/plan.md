@@ -358,13 +358,13 @@ into a broad routing claim.
 
 **Acceptance criteria:**
 
-- [ ] Each host meets the spec thresholds under `guard`, or the shortfall is recorded with evidence.
-- [ ] Evidence is recorded in `docs/research/` without raw task text.
+- [x] Each host meets the spec thresholds under `guard`, or the shortfall is recorded with evidence.
+- [x] Evidence is recorded in `docs/research/` without raw task text.
 - [ ] `dispatch_nudge` is opened only for hosts that meet the thresholds, after explicit user confirmation.
 
 **Verification:**
 
-- [ ] `/tier-report` statistics plus the per-dispatch category table reproduce the conclusion.
+- [x] `/tier-report` statistics plus the per-dispatch category table reproduce the conclusion.
 
 **Dependencies:** Task 14.
 **Files likely touched:** `docs/research/`, `config/routing.catalog.v2.json`.
