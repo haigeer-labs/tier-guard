@@ -299,7 +299,7 @@ into a broad routing claim.
 
 **Acceptance criteria:**
 
-- [ ] `/tier-report` shows counts of `none` / `reminded` / `denied` and the share of later unpinned-session dispatches that passed an explicit model.
+- [x] `/tier-report` shows counts of `none` / `reminded` / `denied` and the share of later unpinned-session dispatches that passed an explicit model.
 - [ ] Claude Code CLI and Codex CLI each reach the spec thresholds over ≥10 natural dispatches, with 0 tradeoff tasks lowered and 0 pinned calls nudged.
 - [ ] Evidence is recorded in `docs/research/` without raw task text.
 - [ ] `dispatch_nudge` is opened only for hosts with that evidence, after explicit user confirmation.

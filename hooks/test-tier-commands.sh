@@ -109,6 +109,8 @@ check "report：Codex 表格给出建议值（不一致那条建议 xhigh）" "$
 check "report：当前 mode 来自状态文件" "$(yn has "${REP}" "当前 mode：**dry-run**")"
 c_sections() { has "${REP}" "### 建议档 vs 实际执行档" && has "${REP}" "### 打回率" && has "${REP}" "### 误报率" && has "${REP}" "### 切 auto 的门槛"; }
 check "report：建议 vs 实际 / 打回率 / 误报率 / auto 门槛 四节都在" "$(yn c_sections)"
+check "report：全是无 nudge 字段的旧记录 → 提醒段落明说没有记录" \
+  "$(yn has "${REP}" "没有提醒记录（宿主 dispatch_nudge 未开启或尚未派活）。")"
 printf 'not json\n' >> "${DATA}/decisions.jsonl"
 OUT="$(report)"; RC=$?
 c_broken() { [ "${RC}" -eq 0 ] && has "${OUT}" "有 1 行不是合法 JSON"; }
@@ -147,7 +149,8 @@ check "v2 report：audit / auto 分开且能看到 selected haiku" \
 v2_pin() { has "${V2REP}" "pin 1" && has "${V2REP}" "| lower |"; }
 check "v2 report：audit 的 pin 保留方向建议、仍不写成实际执行" \
   "$(yn v2_pin)"
-v2_no_token() { has "${V2REP}" "未观测" && ! has "${V2REP}" "token"; }
+# 整份报告都查，只去掉「主代理预路由提醒」一节固定的免责声明（Task 12）——它字面含 token 是预期的。
+v2_no_token() { has "${V2REP}" "未观测" && ! has "${V2REP//"报告不推算 token"/}" "token"; }
 check "v2 report：未观测到实际执行时明确写未知，不推算 token" \
   "$(yn v2_no_token)"
 
@@ -195,6 +198,82 @@ PY
 LATEREP="$(env -u TIER_GUARD_MODE HOME="${FAKEHOME}" python3 "${ROOT}/hooks/tier_report.py" --data "${V2LATE}")"
 v2_late() { has "${LATEREP}" "| claude-sonnet-5 |" && ! has "${LATEREP}" "| 未观测 |"; }
 check "v2 report：SubagentStop 时 transcript 未落盘，报告回读后仍列出实际模型" "$(yn v2_late)"
+
+echo ""
+echo "═══ 主代理预路由提醒（Task 12） ═══"
+# 报告的输入照旧不手写：用真 hook（Claude 与 Codex 两侧）在 dispatch_nudge=true 的目录下
+# 判一轮，再汇总它写下的 nudge 字段 —— 判据全在 route_decide.nudge_decision，这里只验证计数。
+NUDGE_CATALOG="${TMP}/routing.catalog.v2.nudge-both.json"
+python3 - "${ROOT}/config/routing.catalog.v2.json" "${NUDGE_CATALOG}" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+hc = cfg.setdefault("host_capabilities", {})
+hc.setdefault("claude-code", {})["dispatch_nudge"] = True
+hc.setdefault("codex-cli", {})["dispatch_nudge"] = True
+with open(sys.argv[2], "w", encoding="utf-8") as fh:
+    json.dump(cfg, fh, ensure_ascii=False)
+PY
+hookv2cfg() {  # $1=数据目录 $2=profile $3=事件 $4=payload $5=config
+  printf '%s' "$4" | env HOME="${FAKEHOME}" TIER_GUARD_LOG_DIR="$1" TIER_GUARD_MODE="$2" \
+    TIER_GUARD_CONFIG="$5" /bin/bash "${ROOT}/hooks/tier-guard.sh" "$3"
+}
+hookcodexcfg() {  # $1=数据目录 $2=profile $3=payload $4=config
+  printf '%s' "$3" | env HOME="${FAKEHOME}" TIER_GUARD_LOG_DIR="$1" TIER_GUARD_MODE="$2" \
+    TIER_GUARD_CONFIG="$4" /bin/bash "${ROOT}/hooks/tier-guard-codex.sh"
+}
+mknudge() {  # $1=session_id $2=tool_use_id $3=prompt $4=model(- 不传)
+  python3 -c 'import json,sys
+sid,tid,prompt,model=sys.argv[1:5]
+ti={"description":"t","prompt":prompt,"subagent_type":"general-purpose"}
+if model!="-": ti["model"]=model
+print(json.dumps({"session_id":sid,"tool_use_id":tid,"tool_name":"Agent","tool_input":ti},ensure_ascii=False))' "$1" "$2" "$3" "$4"
+}
+spnudge() {  # $1=session_id $2=message —— fork_turns:"all" 是真实 Codex 每次都带的控制参数，与 pin 无关
+  python3 -c 'import json,sys
+sid,msg=sys.argv[1:3]
+ti={"message":msg,"task_name":"t1","agent_type":"worker","fork_turns":"all"}
+print(json.dumps({"session_id":sid,"turn_id":"t","cwd":"/x","hook_event_name":"PreToolUse",
+                  "model":"gpt-5.6-terra","permission_mode":"default","transcript_path":None,
+                  "tool_name":"spawn_agent","tool_use_id":"c1","tool_input":ti},ensure_ascii=False))' "$1" "$2"
+}
+NUDGEDATA="${TMP}/nudge-data"
+NUDGETOKEN="反重力引擎设计方案禁止外泄"
+# S1（audit）：未 pin → 提醒；pin → 不触发；未 pin → 提醒
+hookv2cfg "${NUDGEDATA}" audit agent "$(mknudge n-s1 n-u1 "${V2SIMPLE} ${NUDGETOKEN}" -)"      "${NUDGE_CATALOG}" >/dev/null
+hookv2cfg "${NUDGEDATA}" audit agent "$(mknudge n-s1 n-u2 "${V2SIMPLE}" sonnet)"                "${NUDGE_CATALOG}" >/dev/null
+hookv2cfg "${NUDGEDATA}" audit agent "$(mknudge n-s1 n-u3 "${V2SIMPLE}" -)"                     "${NUDGE_CATALOG}" >/dev/null
+# S2（auto）：未 pin → 本会话第一次拦截；pin → 不触发
+hookv2cfg "${NUDGEDATA}" auto  agent "$(mknudge n-s2 n-u4 "${V2SIMPLE}" -)"                     "${NUDGE_CATALOG}" >/dev/null
+hookv2cfg "${NUDGEDATA}" auto  agent "$(mknudge n-s2 n-u5 "${V2SIMPLE}" sonnet)"                "${NUDGE_CATALOG}" >/dev/null
+# S3（Codex，audit）：未 pin → 提醒
+hookcodexcfg "${NUDGEDATA}" audit "$(spnudge n-s3 "${V2SIMPLE}")" "${NUDGE_CATALOG}" >/dev/null
+NUDGEREP="$(env -u TIER_GUARD_MODE HOME="${FAKEHOME}" python3 "${ROOT}/hooks/tier_report.py" --data "${NUDGEDATA}")"
+check "report：主代理预路由提醒段落存在" "$(yn has "${NUDGEREP}" "### 主代理预路由提醒")"
+check "report：提醒 3 / 拦截 1 / 未触发 2（共 6 次派活）" \
+  "$(yn has "${NUDGEREP}" "提醒 3 次 / 拦截 1 次 / 未触发 2 次（共 6 次派活）。")"
+check "report：提醒或拦截之后同会话派活 3 次，显式传参 2 次" \
+  "$(yn has "${NUDGEREP}" "提醒或拦截之后同会话派活 3 次，其中显式传参 2 次（2/3）。")"
+check "report：pin 的派活被提醒或拦截 0 次" \
+  "$(yn has "${NUDGEREP}" "pin 的派活被提醒或拦截 0 次（应为 0）。")"
+c_no_prompt() { ! has "${NUDGEREP}" "${NUDGETOKEN}"; }
+check "report：提醒统计不泄露 prompt 原文" "$(yn c_no_prompt)"
+
+# 缺 nudge 字段的 v2 记录（schema 升级前的旧日志）必须被忽略，不能计入统计。
+# 基底记录本身仍由真 hook 产出，这里只对复制出来的第二行删掉 nudge 键，模拟旧版本没有这个字段。
+NUDGELEGACY="${TMP}/nudge-legacy"
+hookv2cfg "${NUDGELEGACY}" audit agent "$(mknudge n-legacy n-legacy-u1 "${V2SIMPLE}" -)" "${NUDGE_CATALOG}" >/dev/null
+python3 - "${NUDGELEGACY}/decisions.jsonl" <<'PY'
+import json, sys
+path = sys.argv[1]
+lines = open(path, encoding="utf-8").read().splitlines()
+rec = json.loads(lines[-1])
+del rec["nudge"]
+lines.append(json.dumps(rec, ensure_ascii=False))
+open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+PY
+LEGACYREP="$(env -u TIER_GUARD_MODE HOME="${FAKEHOME}" python3 "${ROOT}/hooks/tier_report.py" --data "${NUDGELEGACY}")"
+check "report：缺 nudge 字段的 v2 记录被忽略，只数带该字段的那条" \
+  "$(yn has "${LEGACYREP}" "提醒 1 次 / 拦截 0 次 / 未触发 0 次（共 1 次派活）。")"
 
 echo ""
 echo "  总计 ${PASS} 通过 / ${FAIL} 失败"

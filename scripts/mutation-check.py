@@ -394,6 +394,20 @@ M = [
     # codex-exec.sh → 不记日志、不输出。代价只在耗时上，这里的断言本来就不测它。
     ("shell: 去掉 Bash 快速路径", TG, TTG,
      '''  case "${PAYLOAD}" in *codex-exec.sh*) ;; *) exit 0 ;; esac''', '''  :''', "equivalent"),
+    # ── Task 12：/tier-report 的「主代理预路由提醒」段落——只数字段，判据不在这里 ──
+    ("report nudge: 忽略先后顺序（同会话被提醒/拦截之前的记录也算后续派活）", TR, TTC,
+     '''        for _, r in items[first + 1:]:''', '''        for _, r in items:''', "killed"),
+    ("report nudge: 后续派活不再要求显式传参才计入分子", TR, TTC,
+     '''            if ((r.get("decision") or {}).get("requested") or {}).get("pinned") is True:\n                pinned_followups += 1''',
+     '''            pinned_followups += 1''', "killed"),
+    ("report nudge: 缺 nudge 字段的旧记录也被计入（schema 升级前的日志）", TR, TTC,
+     '''              and "nudge" in r]''', ''']''', "killed"),
+    ("report nudge: pin 的派活不论是否被提醒或拦截都计入 K", TR, TTC,
+     '''    k = sum(1 for r in routes\n            if ((r.get("decision") or {}).get("requested") or {}).get("pinned") is True\n            and r.get("nudge") in ("reminded", "denied"))''',
+     '''    k = sum(1 for r in routes\n            if ((r.get("decision") or {}).get("requested") or {}).get("pinned") is True)''', "killed"),
+    ("report nudge: 没有记录时的空文案再也不打印", TR, TTC,
+     '''    if not routes:\n        out.append("没有提醒记录（宿主 dispatch_nudge 未开启或尚未派活）。")\n        return''',
+     '''    if not routes:\n        return''', "killed"),
 ]
 
 SUMMARY = re.compile(r"总计 [1-9]\d* 通过 / 0 失败|route contract: OK")

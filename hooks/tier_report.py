@@ -129,6 +129,50 @@ def _v2_audit(out, recs, recent):
                    f"| {_pair(execution) if execution else '未观测'} | {d.get('action') or '—'} |")
 
 
+def _v2_nudge(out, recs):
+    """主代理预路由提醒统计（Task 12）。判据全在 route_decide.nudge_decision / 各薄壳，
+    这里只数已记录的 `nudge` 字段，不重新判断谁该被提醒或拦截。"""
+    routes = [r for r in recs
+              if r.get("routing_version") == 2 and r.get("event") in ("agent", "codex-spawn")
+              and "nudge" in r]
+    out += ["", "### 主代理预路由提醒", ""]
+    if not routes:
+        out.append("没有提醒记录（宿主 dispatch_nudge 未开启或尚未派活）。")
+        return
+    counts = Counter(r.get("nudge") for r in routes)
+    reminded, denied, none_ = counts.get("reminded", 0), counts.get("denied", 0), counts.get("none", 0)
+    out.append(f"提醒 {reminded} 次 / 拦截 {denied} 次 / 未触发 {none_} 次（共 {len(routes)} 次派活）。")
+
+    # 按 session_id 分组（缺失或空的会话号不参与「同会话后续派活」这项指标），
+    # 组内按 ts 再按原始日志顺序排序，找第一条被提醒或拦截的记录，之后的都是「后续派活」。
+    groups = {}
+    for i, r in enumerate(routes):
+        sid = r.get("session_id")
+        if sid:
+            groups.setdefault(sid, []).append((i, r))
+    followups = pinned_followups = 0
+    for items in groups.values():
+        items.sort(key=lambda pair: (pair[1].get("ts") or "", pair[0]))
+        first = next((i for i, (_, r) in enumerate(items) if r.get("nudge") in ("reminded", "denied")), None)
+        if first is None:
+            continue
+        for _, r in items[first + 1:]:
+            followups += 1
+            if ((r.get("decision") or {}).get("requested") or {}).get("pinned") is True:
+                pinned_followups += 1
+    if followups:
+        out.append(f"提醒或拦截之后同会话派活 {followups} 次，其中显式传参 {pinned_followups} 次"
+                   f"（{pinned_followups}/{followups}）。")
+    else:
+        out.append("提醒或拦截之后同会话派活：暂无样本。")
+
+    k = sum(1 for r in routes
+            if ((r.get("decision") or {}).get("requested") or {}).get("pinned") is True
+            and r.get("nudge") in ("reminded", "denied"))
+    out.append(f"pin 的派活被提醒或拦截 {k} 次（应为 0）。")
+    out.append("取舍类任务是否降档需结合真实宿主评估人工判定；报告不推算 token。")
+
+
 def _irr(a):
     return next((w for w in (a.get("decision") or {}).get("why") or [] if w.get("rule") == "R-IRREVERSIBLE"), {})
 
@@ -282,6 +326,7 @@ def render(ddir, recs, broken, recent, share_days=None, projects=None):
     agents = _agents(recs)
 
     _v2_audit(out, recs, recent)
+    _v2_nudge(out, recs)
 
     s, rules, fallbacks = Counter(), Counter(), Counter()
     for r in recs:
