@@ -21,6 +21,7 @@ hook 编码的证据，但**不构成 v2 的完成项**。本计划完成前，�
 - hook adapter 必须在真实派发前改写参数才能启用 auto；Codex Desktop 已验证主代理明文预路由的三档实际派发，但 hook 因接收不透明令牌仍保持 advisory。
 - 2026-09-13 用户确认：自然使用时主代理不会自发加载 tier-routing，因此由派活事件驱动主代理显式预路由——audit 注入提醒（改变“audit 下 stdout 为空”的旧契约）、auto 每个会话 deny 一次；hook 仍不做语义判断。
 - 提醒与 deny 受 `host_capabilities.<host>.dispatch_nudge` 实测闸门控制，默认全部 `false`；判定逻辑只放在 `hooks/route_decide.py`。
+- 2026-09-13 Task 12 评估后用户确认：新增 `guard` profile 并设为默认（推翻「默认 audit」）。guard = 每会话第一次未 pin 派活 deny 一次、之后提醒，**从不改写参数**；audit 退回只记录 + 提醒；auto = guard + 参数改写。guard 不改参数，可由 `/tier-mode` 直接持久化，不需要 auto 的质量门槛。
 
 ## Dependency graph
 
@@ -310,6 +311,63 @@ into a broad routing claim.
 
 **Dependencies:** Tasks 10 and 11.
 **Files likely touched:** `hooks/tier_report.py`, `hooks/test-tier-commands.sh`, `docs/research/`, `config/routing.catalog.v2.json`.
+**Estimated scope:** M.
+
+### Phase 6: Default guard profile
+
+#### Task 13: Guard profile in core, state and catalog
+
+**Description:** Add `guard` as a routing profile between `audit` and `auto`, make it the production default, and let `/tier-mode` persist it without the auto quality gate.
+
+**Acceptance criteria:**
+
+- [x] `ROUTING_PROFILES` and catalog validation accept `guard`; the production catalog's `mode` is `guard`.
+- [x] Under `guard`, `route()` never yields an applicable target (same pin / target semantics as `audit`).
+- [x] `nudge_decision("guard", …)` behaves like today's auto nudge (deny once per session, then remind); `audit` stays remind-only.
+- [x] `tier_state.py set guard` persists without the gate; `set auto` keeps its current refusal.
+
+**Verification:**
+
+- [x] `route_decide.py --selftest`, `test-route-contract.py` and `test-tier-commands.sh` cover each branch; new assertions are killed in `scripts/mutation-check.py`; `scripts/validate.sh` passes.
+
+**Dependencies:** None.
+**Files likely touched:** `hooks/route_decide.py`, `hooks/tier_state.py`, `config/routing.catalog.v2.json`, `hooks/test-route-contract.py`, `hooks/test-tier-commands.sh`, `scripts/mutation-check.py`.
+**Estimated scope:** M.
+
+#### Task 14: Guard in adapters, report and user-facing text
+
+**Description:** Prove both adapters never emit `updatedInput` under `guard`, count `guard` in `/tier-report`, and align command, skill, README, CLAUDE.md and doctor wording with the new default.
+
+**Acceptance criteria:**
+
+- [x] Claude and Codex shell suites show `guard` denies once, then reminds, and never emits `updatedInput` even when `pre_dispatch_apply=true`.
+- [x] `/tier-report` profile counts include `guard`; messages no longer claim the default is `audit`.
+- [x] `/tier-mode` description, `skills/tier-routing/SKILL.md`, `README.md`, `CLAUDE.md` and `tier_doctor.py` describe `guard` as the default.
+
+**Verification:**
+
+- [x] Shell suites and skill-sync check pass; new assertions are killed in `scripts/mutation-check.py`; `scripts/validate.sh` passes.
+
+**Dependencies:** Task 13.
+**Files likely touched:** `hooks/test-tier-guard.sh`, `hooks/test-tier-guard-codex.sh`, `hooks/tier_report.py`, `hooks/tier_doctor.py`, `commands/tier-mode.md`, `skills/tier-routing/SKILL.md`, `README.md`, `CLAUDE.md`, `scripts/mutation-check.py`.
+**Estimated scope:** M.
+
+#### Task 15: Real-host re-evaluation under guard
+
+**Description:** Repeat the Task 12 protocol (4 natural sessions per host, three real tasks each) with the default `guard` profile, then decide on opening `dispatch_nudge` for each host.
+
+**Acceptance criteria:**
+
+- [ ] Each host meets the spec thresholds under `guard`, or the shortfall is recorded with evidence.
+- [ ] Evidence is recorded in `docs/research/` without raw task text.
+- [ ] `dispatch_nudge` is opened only for hosts that meet the thresholds, after explicit user confirmation.
+
+**Verification:**
+
+- [ ] `/tier-report` statistics plus the per-dispatch category table reproduce the conclusion.
+
+**Dependencies:** Task 14.
+**Files likely touched:** `docs/research/`, `config/routing.catalog.v2.json`.
 **Estimated scope:** M.
 
 ### Final checkpoint: v2 review

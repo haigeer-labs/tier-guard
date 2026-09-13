@@ -16,13 +16,15 @@
 - 独立仓；**运行时**对 agent-skills / spec-guard 零依赖，插件代码不读 `.agent/state.json`
   （本仓的开发流程装了 spec-guard 约定，那是开发工具，不是运行时依赖）
 - 交付形态必须是插件，不往 `~/.claude/settings.json` 塞 hook 片段（Cloud 会话不读本地 settings）
-- 路由只在创建子代理前运行；显式 `model` 或 `reasoning_effort` 是 pin，绝不改写；audit 仍记录相对起点的建议方向
-- 默认配置是 v2 catalog，mode 为 `off` / `audit` / `auto`，默认 `audit`
+- 路由只在创建子代理前运行；显式 `model` 或 `reasoning_effort` 是 pin，绝不改写；audit / guard 仍记录相对起点的建议方向
+- 默认配置是 v2 catalog，mode 为 `off` / `audit` / `guard` / `auto`，默认 `guard`（2026-09-13 用户确认推翻「默认 audit」）；
+  guard 与 audit 都不改写参数，guard 可直接持久化，auto 仍需质量门槛
 - 即使临时设 `TIER_GUARD_MODE=auto`，也只有 catalog 中已实测的
   `host_capabilities.<host>.pre_dispatch_apply=true` 才能实际改写；当前生产目录全为 `false`
 - 不可逆、取舍、跨模块或信息不足不能被路由到低能力候选
 - 主代理预路由提醒（2026-09-13 用户确认）：宿主 `dispatch_nudge=true` 时，audit 对未 pin 派活只输出
-  `additionalContext` 提醒、不改参数；auto 每个会话只 deny 第一次未 pin 派活（标记写不进去就降级为提醒）。
+  `additionalContext` 提醒、不改参数；guard（默认）与 auto 每个会话只 deny 第一次未 pin 派活（标记写不进去就降级为提醒），
+  只有 auto 会在能力闸门允许时改写参数。
   pin、`plugin:name`、fork、off、闸门关闭一律不提醒；生产目录闸门全为 `false`，开启前先问
 - Codex Desktop 已观察到协作派活进入审计 hook；但未验证 `updatedInput` 被宿主采纳，仍只能建议，不能标成自动路由
 

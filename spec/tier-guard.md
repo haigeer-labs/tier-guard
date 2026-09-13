@@ -4,6 +4,8 @@
 > 本地实现与回归已完成，宿主自动改写能力仍以兼容性记录中的真实端到端证据为准。
 >
 > 2026-09-13 增补「主代理预路由提醒」（用户已确认 audit 提醒与 auto 每会话一次 deny；待评审后实施）。
+>
+> 2026-09-13 Task 12 评估后用户确认：新增 `guard` profile 并设为默认（每会话第一次未 pin 派活拦一次、不改参数）；待评审后实施。
 
 ## Objective
 
@@ -62,7 +64,7 @@ tier-guard 负责给已决定创建的子任务选择执行配置。
 
 目录还必须为每个候选宿主声明 `host_capabilities.<host>.pre_dispatch_apply`。它是宿主版本的
 实测闸门，不是模型能力或用户 mode：只有它为 `true`，`auto` 才可以输出参数改写；否则仍记录
-相同决定但 `applied=false`。生产目录默认保持 `audit`；能力闸门只在有对应真实端到端证据的宿主上
+相同决定但 `applied=false`。生产目录默认 profile 为 `guard`（与 `audit` 一样不改写参数）；能力闸门只在有对应真实端到端证据的宿主上
 开启，不能靠临时环境变量绕过。当前 Claude Code CLI 已开启，Codex CLI 与 Desktop 保持关闭。
 
 目录同时为每个宿主声明 `host_capabilities.<host>.dispatch_nudge`：只有宿主已实测支持在
@@ -132,14 +134,18 @@ core 把它记为 `unavailable` 并按无上下文处理，不会让路由失败
 
 2026-09-13 实测：点名 tier-routing 时 Claude 与 Codex 主代理都能显式选对三档；不点名时两者都不加载 skill，
 子代理全部继承父代理参数（证据：[`Claude CLI v2 e2e`](../docs/research/2026-09-13-claude-cli-v2-e2e.md)）。
-因此插件在**子代理创建事件**上驱动主代理自己做预路由，hook 不做语义判断：
+因此插件在**子代理创建事件**上驱动主代理自己做预路由，hook 不做语义判断。
+
+Task 12 真实宿主评估（同一证据文档）进一步显示：在 Claude 上，`audit` 的提醒会被忽略，且提醒在当次工具结果之后才送达，
+结构上无法影响会话第一次派活；每会话拦一次的 deny 则让取舍类任务稳定拿到高能力档。所以默认 profile 为 `guard`：
 
 - 触发条件：未 pin 的派活（PreToolUse `Agent` / `spawn_agent`），且宿主 `dispatch_nudge=true`。pin 的判定同上；
   无法解析是否 pin 的插件 agent（`plugin:name`）不提醒。
 - `audit`：放行派活、不改参数，输出一条提醒上下文，要求主代理按 tier-routing 为之后的派活显式传参。
   两个宿主都在当前工具结果之后送达，所以提醒只影响后续派活。
-- `auto`：同一 `session_id` 内第一次未 pin 派活返回 deny 并附原因，要求显式传参后重派；此后的未 pin 派活
-  放行（能力闸门允许时照旧应用 `updatedInput`）并附提醒。没有 `session_id` 时不 deny。
+- `guard`（默认）：同一 `session_id` 内第一次未 pin 派活返回 deny 并附原因，要求显式传参后重派；此后的未 pin 派活放行并附提醒。
+  **从不输出 `updatedInput`**，由主代理按提醒 / deny 文本里的候选目录自行选择。没有 `session_id` 时不 deny。
+- `auto`：与 `guard` 相同的 deny / 提醒；此外 `pre_dispatch_apply=true` 的宿主上，对未 pin 派活应用 `updatedInput`。
 - 提醒与 deny 原因只引用 tier-routing 与候选目录，不包含任务原文。
 - 任何异常一律放行、stdout 为空，日志写明 fallback 路径；审计记录新增 `nudge`：`none` / `reminded` / `denied`。
 
@@ -153,7 +159,8 @@ core 把它记为 `unavailable` 并按无上下文处理，不会让路由失败
 |---|---|
 | `off` | 不分类、不记录、不改写。 |
 | `audit` | 计算并记录建议，不改写参数；显式 pin 也保留方向性 action，但 `target=null`。未 pin 派活且 `dispatch_nudge=true` 时注入提醒。 |
-| `auto` | 每个会话第一次未 pin 派活 deny 一次，要求显式传参；之后对未 pin 请求应用决定（仅限已验证的 host adapter）并附提醒。 |
+| `guard`（默认） | 与 audit 同样记录、不改写参数；`dispatch_nudge=true` 时每个会话第一次未 pin 派活 deny 一次要求显式传参，之后未 pin 派活附提醒。 |
+| `auto` | `guard` 的全部行为，外加对未 pin 请求应用决定（仅限已验证的 host adapter）。 |
 
 `semantic` 不是独立 mode，而是 `audit` 或 `auto` 下的可选 classifier provider。默认关闭；
 没有 provider 时，灰区任务以 `unknown` 处理并保守路由。
@@ -176,7 +183,7 @@ tier-guard 不改变其只读边界。
 
 | Host | 当前合同 |
 |---|---|
-| Claude Code CLI 2.1.269 | 已验证 `Agent` 的可见任务文本、pin 和 `updatedInput` 在派发前生效；明确只读的未 pin child 已实际以 Haiku 启动。生产目录为该宿主开启能力闸门，但默认 profile 仍为 audit，Cloud 不从此结论外推。 |
+| Claude Code CLI 2.1.269 | 已验证 `Agent` 的可见任务文本、pin 和 `updatedInput` 在派发前生效；明确只读的未 pin child 已实际以 Haiku 启动。生产目录为该宿主开启能力闸门，但默认 profile 为 `guard`（不改写参数），Cloud 不从此结论外推。 |
 | Codex CLI 0.154.0 | 已验证 `updatedInput` 在真实交互式子代理派发前被采纳，且不改变父代理；但原生 `collaboration.spawn_agent` 在 hook 边界交付不透明任务令牌，尚不能据此验证自动语义降档。生产目录仍保持建议式。 |
 | Codex Desktop | 已验证原生 `collaboration.spawn_agent` 进入 audit hook；尚未验证 `updatedInput` 被实际派发采纳，因此只能建议式，不可标为自动路由。 |
 | Codex Cloud | 独立验证；不从 CLI 或 Desktop 外推。 |
@@ -210,3 +217,5 @@ adapter 已输出 `updatedInput`，不等于宿主接收或子代理实际执行
 - 提醒与 deny 只出现在未 pin 的子代理创建事件；pin、`off`、宿主闸门关闭、无 `session_id`、异常分别有
   可验证的“不提醒 / 不 deny”行为；deny 每个会话至多一次。
 - 自然触发评估在 Claude Code CLI 与 Codex CLI 上各自达到 Success criteria 的阈值，并有独立端到端证据。
+- 默认 profile 为 `guard`；`guard` 下任何路径都不输出 `updatedInput`；`/tier-mode` 可直接持久设为 `guard`
+  （不改写参数，不需要 auto 的质量门槛），`audit` 仍可选作只提醒、不拦截。
