@@ -20,7 +20,7 @@
 - 默认配置是 v2 catalog，mode 为 `off` / `audit` / `guard` / `auto`，默认 `guard`（2026-09-13 用户确认推翻「默认 audit」）；
   guard 与 audit 都不改写参数，guard 可直接持久化，auto 仍需质量门槛
 - 即使临时设 `TIER_GUARD_MODE=auto`，也只有 catalog 中已实测的
-  `host_capabilities.<host>.pre_dispatch_apply=true` 才能实际改写；当前生产目录全为 `false`
+  `host_capabilities.<host>.pre_dispatch_apply=true` 才能实际改写；当前生产目录只有 `claude-code` 为 `true`
 - 不可逆、取舍、跨模块或信息不足不能被路由到低能力候选
 - 主代理预路由提醒（2026-09-13 用户确认）：宿主 `dispatch_nudge=true` 时，audit 对未 pin 派活只输出
   `additionalContext` 提醒、不改参数；guard（默认）与 auto 每个会话只 deny 第一次未 pin 派活（标记写不进去就降级为提醒），
