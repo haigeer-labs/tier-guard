@@ -36,7 +36,7 @@
 
 ## 安全边界
 
-默认模式是 `guard`：写入最小化审计信息（任务长度和 SHA-256，不保存任务原文），不改写派发参数；宿主 `dispatch_nudge` 打开时，每个会话第一次未 pin 派活会被拦下一次、要求主代理显式传参。`audit` 仍可选作只提醒、不拦截。
+默认模式是 `guard`：写入最小化审计信息（任务长度和 SHA-256，不保存任务原文），不改写派发参数；宿主 `dispatch_nudge` 打开时，每个会话第一次未 pin 派活会被拦下一次、要求主代理显式传参。`audit` 仍可选作只提醒、不拦截。Claude Code CLI 的 `dispatch_nudge` 已开启（Codex 仍关闭），所以在 Claude 上默认每个会话第一次未 pin 的子代理派活会被拦下一次。
 
 Claude Code CLI `2.1.269` 已验证能在 `PreToolUse` 接收可见子任务文本并采纳 `updatedInput`；一条未 pin 的
 明确只读子任务实际以 Haiku 启动。Claude 的宿主能力闸门因此已开放，但默认仍是不改写参数的 `guard`，只有用户显式

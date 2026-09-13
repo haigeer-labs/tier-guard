@@ -5,7 +5,9 @@
 >
 > 2026-09-13 增补「主代理预路由提醒」（用户已确认 audit 提醒与 auto 每会话一次 deny；待评审后实施）。
 >
-> 2026-09-13 Task 12 评估后用户确认：新增 `guard` profile 并设为默认（每会话第一次未 pin 派活拦一次、不改参数）；待评审后实施。
+> 2026-09-13 Task 12 评估后用户确认：新增 `guard` profile 并设为默认（每会话第一次未 pin 派活拦一次、不改参数）。
+>
+> 2026-09-13 Task 15 guard 复评后用户确认：生产目录只为 Claude Code CLI 打开 `dispatch_nudge`；Codex 保持关闭。
 
 ## Objective
 
@@ -70,7 +72,7 @@ tier-guard 负责给已决定创建的子任务选择执行配置。
 目录同时为每个宿主声明 `host_capabilities.<host>.dispatch_nudge`：只有宿主已实测支持在
 PreToolUse 注入提醒上下文、且 deny 附原因会让主代理带参重派时才为 `true`；为 `false` 时不提醒、不 deny。
 Claude Code CLI 2.1.270 的官方文档与 Codex CLI 0.154.0 的源码（tag `rust-v0.154.0`）已确认两种输出存在，
-但仍须真实宿主实测后才开启；Codex Desktop 保持 `false`。
+Claude Code CLI 已按 Task 15 guard 复评证据开启（2026-09-13 用户确认）；Codex CLI 取舍类未达标、Codex Desktop 未验证，均保持 `false`。
 
 OpenAI 的公开描述可作为目录初始信息：Astra 面向最难的推理与编码，Terra 平衡能力与成本，
 Luna 面向成本敏感、高吞吐任务；实际路由阈值必须用本工作负载的结果校准。
@@ -183,7 +185,7 @@ tier-guard 不改变其只读边界。
 
 | Host | 当前合同 |
 |---|---|
-| Claude Code CLI 2.1.269 | 已验证 `Agent` 的可见任务文本、pin 和 `updatedInput` 在派发前生效；明确只读的未 pin child 已实际以 Haiku 启动。生产目录为该宿主开启能力闸门，但默认 profile 为 `guard`（不改写参数），Cloud 不从此结论外推。 |
+| Claude Code CLI 2.1.269 | 已验证 `Agent` 的可见任务文本、pin 和 `updatedInput` 在派发前生效；明确只读的未 pin child 已实际以 Haiku 启动。生产目录为该宿主开启能力闸门与 `dispatch_nudge`；默认 profile 为 `guard`（不改写参数），每个会话第一次未 pin 派活会被拦下一次。Cloud 不从此结论外推。 |
 | Codex CLI 0.154.0 | 已验证 `updatedInput` 在真实交互式子代理派发前被采纳，且不改变父代理；但原生 `collaboration.spawn_agent` 在 hook 边界交付不透明任务令牌，尚不能据此验证自动语义降档。生产目录仍保持建议式。 |
 | Codex Desktop | 已验证原生 `collaboration.spawn_agent` 进入 audit hook；尚未验证 `updatedInput` 被实际派发采纳，因此只能建议式，不可标为自动路由。 |
 | Codex Cloud | 独立验证；不从 CLI 或 Desktop 外推。 |

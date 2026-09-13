@@ -49,9 +49,10 @@ runv2with() {  # $1=profile $2=payload $3=config [$4=事件]
           TIER_GUARD_CONFIG="${config}" /bin/bash "${HOOK}" "${ev}")"
   RC=$?
 }
-runv2() { runv2with "$1" "$2" "${ROOT}/config/routing.catalog.v2.json" "${3:-agent}"; }
+# 路由编码用例与主代理提醒分开测：生产目录已为 claude-code 打开 dispatch_nudge（Task 15），
+# 这里用只关掉 claude-code.dispatch_nudge 的派生目录，其余字段与生产目录一致。
+runv2() { runv2with "$1" "$2" "${V2_ROUTE_CONFIG}" "${3:-agent}"; }
 runv2unverified() { runv2with "$1" "$2" "${V2_UNVERIFIED_CONFIG}" "${3:-agent}"; }
-V2_CATALOG_SHA="$(shasum -a 256 "${ROOT}/config/routing.catalog.v2.json" | awk '{print $1}')"
 # 用 python 拼 payload / 断言 JSON，避免 jq 依赖
 mk() {  # $1=prompt $2=model(- 不传) $3=subagent_type
   python3 - "$1" "$2" "$3" <<'PY'
@@ -87,12 +88,23 @@ PY
 }
 yn() { if "$@"; then echo yes; else echo no; fi; }
 
+V2_ROUTE_CONFIG="${TMP}/routing.catalog.v2.route.json"
+python3 - "${ROOT}/config/routing.catalog.v2.json" "${V2_ROUTE_CONFIG}" <<'PY'
+import json, sys
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+cfg["host_capabilities"]["claude-code"]["dispatch_nudge"] = False
+with open(sys.argv[2], "w", encoding="utf-8") as fh:
+    json.dump(cfg, fh, ensure_ascii=False)
+PY
+V2_CATALOG_SHA="$(shasum -a 256 "${V2_ROUTE_CONFIG}" | awk '{print $1}')"
+
 # 反向用例：即使处在 auto，未获宿主授权的目录也必须只审计。
 V2_UNVERIFIED_CONFIG="${TMP}/routing.catalog.v2.unverified.json"
 python3 - "${ROOT}/config/routing.catalog.v2.json" "${V2_UNVERIFIED_CONFIG}" <<'PY'
 import json, sys
 cfg = json.load(open(sys.argv[1], encoding="utf-8"))
 cfg.setdefault("host_capabilities", {}).setdefault("claude-code", {})["pre_dispatch_apply"] = False
+cfg["host_capabilities"]["claude-code"]["dispatch_nudge"] = False  # 路由编码用例不掺主代理提醒（生产目录已开 Claude 闸门）
 with open(sys.argv[2], "w", encoding="utf-8") as fh:
     json.dump(cfg, fh, ensure_ascii=False)
 PY
@@ -345,8 +357,12 @@ NUDGE_TASK=$'只读审查配置，禁止修改任何文件。\n验收：报告�
 
 rm -rf "${NLOGD}"
 runnudgeprod audit "$(mksess s0 "${NUDGE_TASK}" - nomodel)"
-check "nudge：生产目录 dispatch_nudge=false，audit + 未 pin → stdout 空" "$(yn [ "${RC}" -eq 0 -a -z "${OUT}" ])"
-check "nudge：生产目录 dispatch_nudge=false → 记 nudge=none" "$(lastnudgelog 'r["nudge"] == "none"')"
+check "nudge：生产目录 claude-code.dispatch_nudge=true，audit + 未 pin → 只提醒（不 deny、不改写）" \
+  "$(nudgeq 'remind_ok(o["hookSpecificOutput"]["additionalContext"]) and "permissionDecision" not in o["hookSpecificOutput"] and "updatedInput" not in o["hookSpecificOutput"]' "${ROOT}/config/routing.catalog.v2.json")"
+check "nudge：生产目录 audit 提醒 → 记 nudge=reminded" "$(lastnudgelog 'r["nudge"] == "reminded"')"
+runnudgewith audit "$(mksess s0off "${NUDGE_TASK}" - nomodel)" "${V2_ROUTE_CONFIG}" "${NLOGD}"
+check "nudge：关掉 claude-code.dispatch_nudge 的目录，audit + 未 pin → stdout 空" "$(yn [ "${RC}" -eq 0 -a -z "${OUT}" ])"
+check "nudge：闸门关闭 → 记 nudge=none" "$(lastnudgelog 'r["nudge"] == "none"')"
 
 runnudge audit "$(mksess s1 "${NUDGE_TASK}" - nomodel)"
 check "nudge：gate 开 + audit + 未 pin → stdout 只有 additionalContext（常量开头 + 候选摘要）" \
@@ -445,7 +461,10 @@ check "guard：同会话第二次未 pin → 只提醒；claude-code pre_dispatc
   "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and "updatedInput" not in o["hookSpecificOutput"] and remind_ok(o["hookSpecificOutput"]["additionalContext"])')"
 check "guard：第二次记 nudge=reminded、applied=false" "$(lastnudgelog 'r["nudge"] == "reminded" and r["applied"] is False')"
 runnudgeprod guard "$(mksess G2 "${NUDGE_TASK}" - nomodel)"
-check "guard：生产目录（dispatch_nudge=false）→ 退出 0、stdout 空（不改写、不提醒）" "$(yn [ "${RC}" -eq 0 -a -z "${OUT}" ])"
+check "guard：生产目录（claude-code.dispatch_nudge=true）新会话未 pin → deny，不带 updatedInput" \
+  "$(nudgeq 'o["hookSpecificOutput"]["permissionDecision"] == "deny" and deny_ok(o["hookSpecificOutput"]["permissionDecisionReason"]) and "updatedInput" not in o["hookSpecificOutput"]' "${ROOT}/config/routing.catalog.v2.json")"
+runnudgewith guard "$(mksess G3 "${NUDGE_TASK}" - nomodel)" "${V2_ROUTE_CONFIG}" "${NLOGD}"
+check "guard：关掉 claude-code.dispatch_nudge 的目录 → 退出 0、stdout 空（不改写、不提醒）" "$(yn [ "${RC}" -eq 0 -a -z "${OUT}" ])"
 
 # ── 并发：同一轮并行派出的多个 Agent 会并发跑 hook，都读到「没 deny 过」──
 # 用 python 把这个时序固定下来（已 deny 检查恒为 False），只有抢到 O_EXCL 标记的那次能 deny。

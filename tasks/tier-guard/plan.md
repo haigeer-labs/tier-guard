@@ -360,7 +360,7 @@ into a broad routing claim.
 
 - [x] Each host meets the spec thresholds under `guard`, or the shortfall is recorded with evidence.
 - [x] Evidence is recorded in `docs/research/` without raw task text.
-- [ ] `dispatch_nudge` is opened only for hosts that meet the thresholds, after explicit user confirmation.
+- [x] `dispatch_nudge` is opened only for hosts that meet the thresholds, after explicit user confirmation.
 
 **Verification:**
 

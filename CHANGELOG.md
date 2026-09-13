@@ -3,6 +3,39 @@
 All notable user-facing changes are documented here. Version numbers follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `guard` routing profile: under a host whose `dispatch_nudge` gate is open,
+  the first unpinned child dispatch in each session is denied once with the
+  host's candidate catalog summary, later unpinned dispatches get a reminder,
+  and parameters are never rewritten. `/tier-mode set guard` persists without
+  the auto quality gate.
+- Reminder and deny texts include the host's candidate catalog summary and a
+  rule to pick high-capability candidates for unclear, tradeoff,
+  cross-cutting or irreversible work.
+- `/tier-report` shows reminder / deny counts, the share of later same-session
+  dispatches that passed explicit parameters, and pinned dispatches that were
+  nudged; the v2 profile count includes `guard`.
+- Claude Code v2 records the child's actual model from `SubagentStop`, and the
+  report re-reads the transcript when the hook fired before it was flushed.
+
+### Changed
+
+- The default profile is now `guard` instead of `audit`.
+- `claude-code.dispatch_nudge` is enabled in the production catalog, so Claude
+  Code CLI denies the first unpinned child dispatch in each session once by
+  default. `audit` remains available as remind-only.
+- Codex `fork_turns` is no longer treated as an unknown pin.
+
+### Known limitations
+
+- `codex-cli.dispatch_nudge` stays disabled: in natural use the Codex parent
+  already passes explicit parameters, and one tradeoff task out of four was
+  explicitly routed to a lower tier by the parent, which guard respects as a
+  pin.
+
 ## [0.1.1] - 2026-09-13
 
 ### Added

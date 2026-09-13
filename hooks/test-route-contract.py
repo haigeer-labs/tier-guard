@@ -105,11 +105,12 @@ def main():
     assert rd.catalog_candidates(disk_catalog, "codex-cli")[0]["id"] == "codex-luna-medium"
     assert rd.host_auto_enabled(disk_catalog, "claude-code") is True
     assert rd.host_auto_enabled(disk_catalog, "codex-cli") is False
-    # nudge: 生产目录里每个已列出的宿主都显式声明 dispatch_nudge=false
-    assert disk_catalog["host_capabilities"], disk_catalog
-    for host, capabilities in disk_catalog["host_capabilities"].items():
-        assert capabilities.get("dispatch_nudge") is False, (host, capabilities)
-        assert rd.host_nudge_enabled(disk_catalog, host) is False, host
+    # nudge: 生产目录只为 Task 15 达标的 Claude Code CLI 打开 dispatch_nudge（2026-09-13 用户确认）；Codex 保持关闭
+    expected_nudge = {"claude-code": True, "codex-cli": False}
+    assert set(disk_catalog["host_capabilities"]) == set(expected_nudge), disk_catalog["host_capabilities"]
+    for host, want in expected_nudge.items():
+        assert disk_catalog["host_capabilities"][host].get("dispatch_nudge") is want, (host, disk_catalog["host_capabilities"][host])
+        assert rd.host_nudge_enabled(disk_catalog, host) is want, host
     try:
         rd.load_catalog(os.path.join(root, "config", "routing.default.json"))
     except rd.ConfigError as exc:
