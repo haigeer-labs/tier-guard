@@ -152,3 +152,45 @@ deny——修复前 3 条失败（77 / 3），修复后 80 / 0；`scripts/mutati
 
 恢复：两个会话已关闭，e2e 插件与 marketplace 已删除，空缓存目录已 `rmdir`；`config.toml` 先备份，再只删除本轮新增的
 e2e hook 信任表。`codex plugin list` 只剩 `tier-guard@tier-guard 0.1.1`，其目录指纹仍为 `fec0067b…`。
+
+## 对照测试：child 真正执行取舍分析（18:05 起）
+
+为区分「摘要不足以约束」与「测试任务本身是机械的」，把三个 child 换成真正要做的事，其余条件不变（auto、禁止使用 skill、
+child 不得使用工具，被测代码仍为 `56de0e1`）：
+
+- A：数出 `alpha,beta,gamma` 的逗号分隔项，只回复数字（机械只读）；
+- B：写 `add(a, b)` 及两条 assert 测试，只回复代码（受限实现）；
+- C：针对 24/7 流量的生产 PostgreSQL，从风险、成本、回滚比较一次性迁移与 expand-contract 迁移，至多五条，再给出推荐与一句理由（取舍）。
+
+判据：主代理被拦后重派时，C 是否拿到高能力档。
+
+### Claude Code CLI（2 轮）
+
+| 轮次 | session | 被拦派活 | 重派显式参数（A / B / C） | 实际模型 |
+|---|---|---|---|---|
+| 1 | `3599d8dd-723f-40fd-a49b-d29e169118ac` | 1 次，工具结果为 deny 常量 + 摘要 | `haiku` / `sonnet` / `opus` | `claude-haiku-4-5-20251001` / `claude-sonnet-5` / `claude-opus-5` |
+| 2 | `5ca4a659-b79e-47d5-9451-ee21304d5938` | 1 次，工具结果为 deny 常量 + 摘要 | `haiku` / `sonnet` / `opus` | `claude-haiku-4-5-20251001` / `claude-sonnet-5` / `claude-opus-5` |
+
+两轮都没有调用 skill；取舍类 C 两次都是 opus，与候选目录一致。
+
+### Codex CLI（2 轮）
+
+快照同上（`0.1.1+codex.20260913175121`，`codex_hook.py` `a0f1b0b1…`）。hook 信任仍先在只回复 `READY` 的会话里逐条核对后
+只信任 e2e 这一条，再开两个正式会话。
+
+| 轮次 | 父线程 | 被拦 | 重派显式参数 = SQLite 实际参数（A / B / C） | 摘要送达 |
+|---|---|---|---|---|
+| 1 | `01a09a3f-c106-7220-a0fa-1b260fb2140e` | 1 次（`nudge=denied`） | `luna/medium` / `luna/medium` / `terra/xhigh` | rollout 中摘要标记 1 次 |
+| 2 | `01a09a3f-ceae-7a53-bce2-935080ad7dcb` | 1 次（`nudge=denied`） | `luna/medium` / `luna/medium` / `terra/xhigh` | rollout 中摘要标记 1 次 |
+
+### 结论
+
+- **Codex 取舍类降档的原因是测试设计。** 当 C 真正需要做取舍分析时，Codex 主代理在不加载 skill 的情况下两轮都给了
+  `terra/xhigh`；上一轮的 `luna/medium` 出现在 child 只回复固定文本、实际工作是机械任务的场景下。
+- **候选目录摘要在两个宿主上都能在拿不到 skill 时约束选档**：取舍类任务 4/4 次拿到高能力档（Claude opus ×2、Codex `terra/xhigh` ×2），
+  所有重派参数都在候选目录内。
+- **次要观察：** 受限实现 B 在 Codex 上两轮都是 `luna/medium`，按目录应为 `terra/high`；Claude 两轮都是 sonnet。
+  规约的硬门槛只约束取舍类任务，这一偏低选择留给 Task 12 的数据判断是否需要处理。
+
+恢复：两个会话已关闭，e2e 插件与 marketplace 已删除，空缓存目录已 `rmdir`；`config.toml` 先备份，再只删除本轮新增的
+e2e hook 信任表。

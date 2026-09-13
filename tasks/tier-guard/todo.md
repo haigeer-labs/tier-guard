@@ -27,8 +27,11 @@
     （`route_decide.catalog_summary`；单测先红后绿，变异 25 条符合预期）。
     真实宿主复测（2026-09-13 17:51 起，提交 `56de0e1`）：Claude auto 被拦后不加载 skill 也按目录传 haiku / sonnet / opus（通过）；
     Codex auto 改为目录内的 `luna/medium`，但取舍类任务仍被分到最低档（未达标）。
-  - [ ] 区分 Codex 取舍类降档的原因：现有测试让 child 只回复固定文本，任务实质是机械的。需要一轮 child 真正做取舍分析的对照，
-    再决定是否要加强文本约束。证据：[`dispatch nudge e2e`](../../docs/research/2026-09-13-dispatch-nudge-e2e.md)
+  - [x] 区分 Codex 取舍类降档的原因：对照测试（child 真正做取舍分析，auto + 禁止 skill，每宿主 2 轮）中取舍类任务 4/4 次拿到高能力档
+    （Claude opus ×2、Codex `terra/xhigh` ×2）；此前的降档来自「child 只回复固定文本」的测试设计，不需要加强文本约束。
+    证据：[`dispatch nudge e2e`](../../docs/research/2026-09-13-dispatch-nudge-e2e.md)
+  - [ ] 观察：Codex 被拦后给受限实现任务选了 `luna/medium`（目录应为 `terra/high`，2/2 轮；Claude 为 sonnet）。不违反取舍类门槛，
+    留给 Task 12 的数据判断是否需要处理
   - [ ] Claude audit 提醒在真实宿主送达但未被采纳（1 轮、提醒后 2 次派活）。2026-09-13 用户确认：不改 audit 语义，
     留到 Task 12 用每宿主 ≥10 次自然派活的数据再决定
 - [ ] Task 12 · 报告与自然触发真实宿主评估（每宿主 ≥10 次，开闸门前再确认）
