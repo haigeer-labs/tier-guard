@@ -24,7 +24,11 @@
   - [x] 修复后在真实 Codex CLI 上复测提醒 / deny：宿主采纳提醒上下文与 deny + 原因，主代理带显式参数重派
   - [x] 风险：deny 后主代理不加载 skill 时自行降档（复测中三个 child 均为不在目录里的 `luna/low`，含取舍类任务）。
     2026-09-13 用户确认并实现：提醒 / deny 文本附上本宿主候选目录摘要与「信息不足、取舍、跨模块或不可逆选高档」
-    （`route_decide.catalog_summary`；单测先红后绿，变异 25 条符合预期）。真实宿主上的效果尚未复测
+    （`route_decide.catalog_summary`；单测先红后绿，变异 25 条符合预期）。
+    真实宿主复测（2026-09-13 17:51 起，提交 `56de0e1`）：Claude auto 被拦后不加载 skill 也按目录传 haiku / sonnet / opus（通过）；
+    Codex auto 改为目录内的 `luna/medium`，但取舍类任务仍被分到最低档（未达标）。
+  - [ ] 区分 Codex 取舍类降档的原因：现有测试让 child 只回复固定文本，任务实质是机械的。需要一轮 child 真正做取舍分析的对照，
+    再决定是否要加强文本约束。证据：[`dispatch nudge e2e`](../../docs/research/2026-09-13-dispatch-nudge-e2e.md)
   - [ ] Claude audit 提醒在真实宿主送达但未被采纳（1 轮、提醒后 2 次派活）。2026-09-13 用户确认：不改 audit 语义，
     留到 Task 12 用每宿主 ≥10 次自然派活的数据再决定
 - [ ] Task 12 · 报告与自然触发真实宿主评估（每宿主 ≥10 次，开闸门前再确认）

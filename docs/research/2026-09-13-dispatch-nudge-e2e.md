@@ -112,5 +112,43 @@ deny——修复前 3 条失败（77 / 3），修复后 80 / 0；`scripts/mutati
 
 `codex plugin remove tier-guard@tier-guard-e2e` 与 `codex plugin marketplace remove tier-guard-e2e` 已执行：
 `codex plugin list` 只剩 `tier-guard@tier-guard 0.1.1`（已安装、已启用），其缓存目录指纹仍为 `fec0067b…`。
-`plugin remove` 留下的空目录 `~/.codex/plugins/cache/tier-guard-e2e` 已用 `rmdir` 删除；`config.toml` 里
-`tier-guard@tier-guard-e2e` 的 hook 信任条目仍有残留（未手改配置，待确认后清理）。
+`plugin remove` 留下的空目录 `~/.codex/plugins/cache/tier-guard-e2e` 已用 `rmdir` 删除。`config.toml` 里
+`tier-guard@tier-guard-e2e` 的 hook 信任条目经用户确认后清理：先备份整个文件，只删除该表（表头、`trusted_hash` 与一个空行），
+原插件 `tier-guard@tier-guard` 的信任条目保持不变。
+
+## 候选目录摘要复测（17:51 起）
+
+被测：提交 `56de0e1`（提醒 / deny 文本附上本宿主候选目录摘要与「信息不足、取舍、跨模块或不可逆选高档」）。
+两个宿主都用「不要读取、加载或使用任何 skill」+ 自然提示词，专门检验主代理拿不到 skill 时能否只凭文本选对档位。
+
+### Claude Code CLI
+
+| 场景 | session | 派活（按顺序） | hook `nudge` | 实际模型 |
+|---|---|---|---|---|
+| auto | `21fef527-8885-43cb-b32d-23249bdd5ca8` | ① 未传 model → 被拦（工具结果为 deny 常量 + 摘要）；② ③ ④ 未调用 skill，显式 `haiku` / `sonnet` / `opus` | denied ×1，之后 none ×3 | `claude-haiku-4-5-20251001` / `claude-sonnet-5` / `claude-opus-5` |
+| audit | `7ef2567c-ea3c-4cf1-a2db-18f7df09849d` | 3 次均未传 model | reminded ×3 | 3 个都是 `claude-sonnet-5`（继承） |
+
+- **auto：通过。** 主代理没有加载 skill，只凭 deny 原因里的摘要按三档显式传参，取舍类的 C 为 opus，没有降档。
+- **audit：提醒仍未被采纳。** 父转录里 3 条 `hook_additional_context` 都带摘要，但后续派活没有显式传参。
+
+### Codex CLI
+
+快照 `tier-guard@tier-guard-e2e` `0.1.1+codex.20260913175121`（来自 `56de0e1`；`codex_hook.py` 指纹 `a0f1b0b1…`、
+`route_decide.py` `adc7a83b…` 与工作树一致，目录 `1ccfb63d…`）。hook 信任先在一个只回复 `READY`、不派子代理的会话里
+逐条核对后只信任 e2e 这一条，再开正式会话，避免信任前就开始派活。
+
+| 场景 | 父线程 | e2e hook | 父 rollout | child 实际参数（SQLite） |
+|---|---|---|---|---|
+| audit | `01a09a31-b2b2-7c93-8993-437eecbaf097` | `pinned=False`，`nudge=reminded` ×3 | 提醒文本 3 次、摘要标记 3 次 | 3 个都是 `terra/high`（继承） |
+| auto | `01a09a31-bd19-7380-8217-fa36102555a3` | 第 1 次 `denied`，之后 3 次 `pinned=True`、`nudge=none` | 被拦 1 次，deny 文本 1 次、摘要标记 1 次；TUI 的 `Blocked by hook` 原文带摘要 | 3 个都是 `luna/medium`（显式） |
+
+- 摘要文本已送达主代理（两轮 rollout 都能找到摘要标记）。
+- **auto：比上一轮好，但仍未达标。** 主代理不再使用目录外的 `luna/low`，而是目录内的 `luna/medium`；但取舍类的 C
+  仍然被分到最低档（按目录应为 `terra/xhigh`），违反「取舍类任务 0 次被降档」。
+- **归因不干净。** 本测试要求每个 child「不得使用工具、只回复固定文本」，C 的实际工作量是机械的，把三个都判为
+  机械只读在语义上也说得通。同一提示词下 Claude 主代理把 C 判为 opus，而 Codex 没有。要区分「摘要不足以约束」
+  与「测试任务本身是机械的」，需要让 child 真正执行取舍工作的对照测试。
+- audit：提醒仍未被采纳（提示词禁止使用 skill）。
+
+恢复：两个会话已关闭，e2e 插件与 marketplace 已删除，空缓存目录已 `rmdir`；`config.toml` 先备份，再只删除本轮新增的
+e2e hook 信任表。`codex plugin list` 只剩 `tier-guard@tier-guard 0.1.1`，其目录指纹仍为 `fec0067b…`。
