@@ -281,13 +281,25 @@ except Exception:
     print("no")
 PY
 }
-nudgeq() {  # $1=python 表达式（变量 o=stdout JSON，rd=route_decide 模块）
-  python3 - "$1" "${OUT}" "${ROOT}/hooks" <<'PY'
+nudgeq() {  # $1=python 表达式（变量 o=stdout JSON，rd=route_decide 模块，cfg=对应配置字典，
+            #   remind_ok/deny_ok/all_models_ok=下面预置的断言辅助函数）$2=配置路径（默认 V2_NUDGE_CONFIG）
+  local expr="$1" cfgpath="${2:-${V2_NUDGE_CONFIG}}"
+  python3 - "${expr}" "${OUT}" "${ROOT}/hooks" "${cfgpath}" <<'PY'
 import json, sys
 sys.path.insert(0, sys.argv[3])
 import route_decide as rd  # noqa: F401
 try:
     o = json.loads(sys.argv[2])
+    cfg = json.load(open(sys.argv[4], encoding="utf-8"))
+    # remind/deny 文案 = 常量 + 候选目录摘要；两半分开验，别把测试写成跟产出一样的拼接。
+    def remind_ok(text):
+        return text.startswith(rd.NUDGE_REMIND_TEXT) and rd.catalog_summary(cfg, "codex-cli") in text
+    def deny_ok(text):
+        return text.startswith(rd.NUDGE_DENY_TEXT) and rd.catalog_summary(cfg, "codex-cli") in text
+    def all_models_ok(text):
+        own = {c["model"] for c in rd.catalog_candidates(cfg, "codex-cli")}
+        other = {c["model"] for c in rd.catalog_candidates(cfg, "claude-code")}
+        return all(m in text for m in own) and not any(m in text for m in other)
     print("yes" if eval(sys.argv[1]) else "no")
 except Exception:
     print("no")
@@ -301,10 +313,12 @@ check "nudge：生产目录 dispatch_nudge=false，audit + 未 pin → stdout �
 check "nudge：生产目录 dispatch_nudge=false → 记 nudge=none" "$(lastnudgelog 'r["nudge"] == "none"')"
 
 runnudge audit "$(spn s1 "${NUDGE_TASK}" - -)"
-check "nudge：gate 开 + audit + 未 pin → stdout 只有 additionalContext（等于 route_decide 的常量）" \
-  "$(nudgeq 'o["hookSpecificOutput"]["hookEventName"] == "PreToolUse" and o["hookSpecificOutput"]["additionalContext"] == rd.NUDGE_REMIND_TEXT and "updatedInput" not in o["hookSpecificOutput"] and "permissionDecision" not in o["hookSpecificOutput"]')"
+check "nudge：gate 开 + audit + 未 pin → stdout 只有 additionalContext（常量开头 + 候选摘要）" \
+  "$(nudgeq 'o["hookSpecificOutput"]["hookEventName"] == "PreToolUse" and remind_ok(o["hookSpecificOutput"]["additionalContext"]) and "updatedInput" not in o["hookSpecificOutput"] and "permissionDecision" not in o["hookSpecificOutput"]')"
 check "nudge：audit 提醒记 nudge=reminded，applied=false" \
   "$(lastnudgelog 'r["nudge"] == "reminded" and r["applied"] is False')"
+check "nudge：提醒文案含 codex-cli 全部候选 model，不含 claude-code 候选 model" \
+  "$(nudgeq 'all_models_ok(o["hookSpecificOutput"]["additionalContext"])')"
 
 runnudge audit "$(spn s2 "${NUDGE_TASK}" gpt-5.6-terra -)"
 check "nudge：gate 开 + audit：显式 model 是 pin → stdout 空" "$(yn [ -z "${OUT}" ])"
@@ -316,26 +330,26 @@ check "nudge：显式 effort pin → 记 nudge=none" "$(lastnudgelog 'r["nudge"]
 # 与是否 pin 无关（rust-v0.154.0 spawn.rs：model/effort 覆盖在区分 fork 模式之前无条件生效）。
 runnudge audit "$(spn s4 "${NUDGE_TASK}" - - all)"
 check "nudge：真实形状 fork_turns=all + 未 pin + audit → 仍提醒，不 deny" \
-  "$(nudgeq 'o["hookSpecificOutput"]["additionalContext"] == rd.NUDGE_REMIND_TEXT and "permissionDecision" not in o["hookSpecificOutput"]')"
+  "$(nudgeq 'remind_ok(o["hookSpecificOutput"]["additionalContext"]) and "permissionDecision" not in o["hookSpecificOutput"]')"
 check "nudge：fork_turns=all 未 pin → 记 nudge=reminded" "$(lastnudgelog 'r["nudge"] == "reminded"')"
 runnudge auto "$(spn FORK1 "${NUDGE_TASK}" - - all)"
 check "nudge：真实形状 fork_turns=all + 未 pin + auto 新会话 → deny" \
-  "$(nudgeq 'o["hookSpecificOutput"]["permissionDecision"] == "deny" and o["hookSpecificOutput"]["permissionDecisionReason"] == rd.NUDGE_DENY_TEXT')"
+  "$(nudgeq 'o["hookSpecificOutput"]["permissionDecision"] == "deny" and deny_ok(o["hookSpecificOutput"]["permissionDecisionReason"])')"
 
 runnudge audit "$(spn s5 "${OPAQUE_TASK_TOKEN}" - -)"
 check "nudge：不透明任务令牌 + 未 pin + audit → 仍提醒（additionalContext）" \
-  "$(nudgeq 'o["hookSpecificOutput"]["additionalContext"] == rd.NUDGE_REMIND_TEXT')"
+  "$(nudgeq 'remind_ok(o["hookSpecificOutput"]["additionalContext"])')"
 check "nudge：不透明任务令牌 → 记 nudge=reminded" \
   "$(lastnudgelog 'r["nudge"] == "reminded" and r["task_visibility"] == "opaque_token"')"
 
 runnudge auto "$(spn A "${NUDGE_TASK}" - -)"
-check "nudge：gate 开 + auto + session A 第一次未 pin → deny（原因是 route_decide 的 deny 常量）" \
-  "$(nudgeq 'o["hookSpecificOutput"]["hookEventName"] == "PreToolUse" and o["hookSpecificOutput"]["permissionDecision"] == "deny" and o["hookSpecificOutput"]["permissionDecisionReason"] == rd.NUDGE_DENY_TEXT and "updatedInput" not in o["hookSpecificOutput"]')"
+check "nudge：gate 开 + auto + session A 第一次未 pin → deny（原因以 route_decide 的 deny 常量开头 + 候选摘要）" \
+  "$(nudgeq 'o["hookSpecificOutput"]["hookEventName"] == "PreToolUse" and o["hookSpecificOutput"]["permissionDecision"] == "deny" and deny_ok(o["hookSpecificOutput"]["permissionDecisionReason"]) and "updatedInput" not in o["hookSpecificOutput"]')"
 check "nudge：deny 记 nudge=denied，applied=false" "$(lastnudgelog 'r["nudge"] == "denied" and r["applied"] is False')"
 
 runnudge auto "$(spn A "${NUDGE_TASK}" - -)"
 check "nudge：同一 session A 第二次未 pin → 不再 deny，只提醒（宿主未验证 apply，不带 updatedInput）" \
-  "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and "updatedInput" not in o["hookSpecificOutput"] and o["hookSpecificOutput"]["additionalContext"] == rd.NUDGE_REMIND_TEXT')"
+  "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and "updatedInput" not in o["hookSpecificOutput"] and remind_ok(o["hookSpecificOutput"]["additionalContext"])')"
 check "nudge：session A 第二次记 nudge=reminded" "$(lastnudgelog 'r["nudge"] == "reminded"')"
 
 runnudgemerged auto "$(spn E "${NUDGE_TASK}" - -)"
@@ -343,7 +357,7 @@ check "nudge：宿主已验证 pre_dispatch_apply 时，session E 第一次仍�
   "$(nudgeq 'o["hookSpecificOutput"]["permissionDecision"] == "deny" and "updatedInput" not in o["hookSpecificOutput"]')"
 runnudgemerged auto "$(spn E "${NUDGE_TASK}" - -)"
 check "nudge：session E 第二次未 pin → allow + updatedInput + additionalContext 同框（宿主已验证 apply）" \
-  "$(nudgeq 'o["hookSpecificOutput"]["permissionDecision"] == "allow" and o["hookSpecificOutput"]["updatedInput"]["model"] == "gpt-5.6-luna" and o["hookSpecificOutput"]["updatedInput"]["reasoning_effort"] == "medium" and o["hookSpecificOutput"]["additionalContext"] == rd.NUDGE_REMIND_TEXT')"
+  "$(nudgeq 'o["hookSpecificOutput"]["permissionDecision"] == "allow" and o["hookSpecificOutput"]["updatedInput"]["model"] == "gpt-5.6-luna" and o["hookSpecificOutput"]["updatedInput"]["reasoning_effort"] == "medium" and remind_ok(o["hookSpecificOutput"]["additionalContext"])' "${V2_NUDGE_MERGED_CONFIG}")"
 check "nudge：session E 第二次记 nudge=reminded 且 applied=true" "$(lastnudgelog 'r["nudge"] == "reminded" and r["applied"] is True')"
 
 runnudge auto "$(spn B "${NUDGE_TASK}" - -)"
@@ -353,7 +367,7 @@ check "nudge：session B 第一次记 nudge=denied" "$(lastnudgelog 'r["nudge"] 
 
 runnudge auto "$(spn - "${NUDGE_TASK}" - -)"
 check "nudge：auto 但 payload 没 session_id → 只 remind，不 deny" \
-  "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and o["hookSpecificOutput"]["additionalContext"] == rd.NUDGE_REMIND_TEXT')"
+  "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and remind_ok(o["hookSpecificOutput"]["additionalContext"])')"
 check "nudge：无 session_id → 记 nudge=reminded" "$(lastnudgelog 'r["nudge"] == "reminded"')"
 
 # env=off 会被薄壳快速路径拦下，这里走状态文件，才真正测到 python 这一侧
@@ -381,8 +395,8 @@ NLOGD_FAIL="${TMP}/nudge-log-fail"; mkdir -p "${NLOGD_FAIL}"
 : > "${NLOGD_FAIL}/nudge-denied"
 runnudgewith auto "$(spn D "${NUDGE_TASK}" - -)" "${V2_NUDGE_CONFIG}" "${NLOGD_FAIL}"
 check "nudge：标记目录被占用 → 退出 0" "$(yn [ "${RC}" -eq 0 ])"
-check "nudge：标记写不进去 → 降级为 remind，不 deny" \
-  "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and o["hookSpecificOutput"]["additionalContext"] == rd.NUDGE_REMIND_TEXT')"
+check "nudge：标记写不进去 → 降级为 remind，不 deny，仍带候选摘要" \
+  "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and remind_ok(o["hookSpecificOutput"]["additionalContext"])')"
 
 # ── stdout 从不出现 ask，deny 原因从不为空 ──
 BADNUDGE=0
@@ -419,7 +433,7 @@ tier_state.nudge_already_denied = lambda session_id: False
 outs = [cx.on_spawn_v2(payload, cfg, "auto", {"origin": "environment", "sha256": sha})[1] for _ in range(3)]
 hso = [(o or {}).get("hookSpecificOutput", {}) for o in outs]
 denies = sum(1 for h in hso if h.get("permissionDecision") == "deny")
-reminds = sum(1 for h in hso if h.get("additionalContext") == rd.NUDGE_REMIND_TEXT and "permissionDecision" not in h)
+reminds = sum(1 for h in hso if h.get("additionalContext", "").startswith(rd.NUDGE_REMIND_TEXT) and "permissionDecision" not in h)
 print("yes" if denies == 1 and reminds == 2 else "no")
 PY
 }

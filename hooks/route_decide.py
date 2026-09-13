@@ -301,7 +301,32 @@ NUDGE_REMIND_TEXT = "tier-guard：创建未 pin 的子代理前，请先按 tier
 NUDGE_DENY_TEXT = "tier-guard（auto）：本会话第一次未 pin 的派活已被拦下。请先加载 tier-routing skill，按本次子任务选择候选目录中最低成本合格的 model（Codex 另传 reasoning_effort），带上显式参数后重新派活；本会话之后不会再拦截。"
 
 
-def nudge_decision(profile, pinned, host_gate, session_id, already_denied):
+def catalog_summary(cfg, host):
+    """把该宿主的候选目录（catalog_candidates 已按成本排序）压成一行摘要，供 nudge 文案附带 ——
+    提醒/拦截原文本身不带候选信息，主代理容易凭记忆报出目录外的组合。没有候选时返回空串。"""
+    candidates = catalog_candidates(cfg, host)
+    if not candidates:
+        return ""
+    parts = []
+    for c in candidates:
+        target = c["model"]
+        if c["reasoning_effort"] is not None:
+            target += f" / {c['reasoning_effort']}"
+        parts.append("+".join(c["capabilities"]) + f" → {target}")
+    return (f"候选目录（{host}，按成本从低到高）：" + "；".join(parts) +
+            "。信息不足、取舍、跨模块或不可逆动作一律选高能力候选，不要自行降档或使用目录外的组合。")
+
+
+def nudge_text(action, summary=""):
+    """把 nudge_decision 的 action 编码为具体文案；remind/deny 附带候选目录摘要（可为空），
+    其余 action（none/deny 之外……）没有对应文案。"""
+    base = {"remind": NUDGE_REMIND_TEXT, "deny": NUDGE_DENY_TEXT}.get(action)
+    if base is None:
+        return None
+    return base + summary if summary else base
+
+
+def nudge_decision(profile, pinned, host_gate, session_id, already_denied, summary=""):
     """主代理预路由提醒的纯判据。只产出 action/text，宿主编码（deny 要不要配
     permissionDecision 之类）留给薄壳；异常交给调用方按放行处理。"""
     if profile not in ROUTING_PROFILES:
@@ -314,11 +339,11 @@ def nudge_decision(profile, pinned, host_gate, session_id, already_denied):
         # True（真 pin）或 None（插件 agent 判不出，比如 plugin:name）都不提醒。
         return {"action": "none", "text": None}
     if profile == "audit":
-        return {"action": "remind", "text": NUDGE_REMIND_TEXT}
+        return {"action": "remind", "text": nudge_text("remind", summary)}
     # profile == "auto"：同一 session 第一次未 pin 派活 deny，之后只 remind。
     if isinstance(session_id, str) and session_id and already_denied is not True:
-        return {"action": "deny", "text": NUDGE_DENY_TEXT}
-    return {"action": "remind", "text": NUDGE_REMIND_TEXT}
+        return {"action": "deny", "text": nudge_text("deny", summary)}
+    return {"action": "remind", "text": nudge_text("remind", summary)}
 
 
 def check_config(cfg):
@@ -756,6 +781,47 @@ def selftest():
             return True
         return False
     case("nudge：未知 profile → 抛 ValueError（适配层失败即放行）", nudge_raises())
+
+    # catalog_summary：nudge 文案附带的候选目录摘要，只从 catalog_candidates 派生
+    catalog = load_catalog()
+
+    def _in_order(text, subs):
+        start = 0
+        for s in subs:
+            i = text.find(s, start)
+            if i == -1:
+                return False
+            start = i + len(s)
+        return True
+
+    claude_summary = catalog_summary(catalog, "claude-code")
+    codex_summary = catalog_summary(catalog, "codex-cli")
+    case("catalog_summary：claude-code 候选按成本从低到高出现（haiku→sonnet→opus）",
+         _in_order(claude_summary, ["haiku", "sonnet", "opus"]))
+    case("catalog_summary：claude-code 摘要不含 codex 候选 model",
+         not any(m in claude_summary for m in ("gpt-5.6-luna", "gpt-5.6-terra")))
+    case("catalog_summary：codex-cli 候选按成本从低到高出现，且带 effort",
+         _in_order(codex_summary, ["gpt-5.6-luna / medium", "gpt-5.6-terra / high", "gpt-5.6-terra / xhigh"]))
+    case("catalog_summary：codex-cli 摘要不含 claude 候选 model",
+         not any(m in codex_summary for m in ("haiku", "sonnet", "opus")))
+    case("catalog_summary：两个宿主都带保守兜底句",
+         "不要自行降档或使用目录外的组合" in claude_summary and "不要自行降档或使用目录外的组合" in codex_summary)
+    case("catalog_summary：未知宿主 → 空字符串", catalog_summary(catalog, "no-such-host") == "")
+
+    # nudge_text / nudge_decision(summary=...)：remind/deny 文案附带摘要，summary 为空时恰好是常量本身
+    SUMMARY_TEST = "候选摘要TEST"
+    case("nudge_text：none 动作 → None", nudge_text("none") is None)
+    case("nudge_text：remind 附带 summary", nudge_text("remind", SUMMARY_TEST) == NUDGE_REMIND_TEXT + SUMMARY_TEST)
+    case("nudge_text：deny 附带 summary", nudge_text("deny", SUMMARY_TEST) == NUDGE_DENY_TEXT + SUMMARY_TEST)
+    case("nudge_text：summary 为空 → 恰好是常量本身", nudge_text("remind") == NUDGE_REMIND_TEXT)
+    case("nudge：summary 非空时 remind 文本 = 常量 + summary",
+         nudge_decision("audit", False, True, "s1", False, SUMMARY_TEST)
+         == {"action": "remind", "text": NUDGE_REMIND_TEXT + SUMMARY_TEST})
+    case("nudge：summary 非空时 deny 文本 = 常量 + summary",
+         nudge_decision("auto", False, True, "s1", False, SUMMARY_TEST)
+         == {"action": "deny", "text": NUDGE_DENY_TEXT + SUMMARY_TEST})
+    case("nudge：summary 为空串时 remind 恰好等于基础常量",
+         nudge_decision("audit", False, True, "s1", False, "") == {"action": "remind", "text": NUDGE_REMIND_TEXT})
 
     print("")
     print(f"  总计 {len(ok)} 通过 / {len(bad)} 失败")

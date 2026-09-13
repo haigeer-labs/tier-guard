@@ -192,14 +192,15 @@ def on_agent_v2(payload, cfg, mode, catalog_identity):
     nudge_pin = _nudge_pin(ti, subagent_type, found, agent_model)
     host_nudge_gate = rd.host_nudge_enabled(cfg, "claude-code")
     already_denied = tier_state.nudge_already_denied(session_id)
-    n = rd.nudge_decision(mode, nudge_pin, host_nudge_gate, session_id, already_denied)
+    nudge_summary = rd.catalog_summary(cfg, "claude-code")
+    n = rd.nudge_decision(mode, nudge_pin, host_nudge_gate, session_id, already_denied, nudge_summary)
     nudge_status, deny_reason, reminder_text = "none", None, None
     if n["action"] == "deny":
         if tier_state.claim_nudge_deny(session_id) == "created":
             nudge_status, deny_reason = "denied", n["text"]
         else:
             # 并发抢输（别的 hook 已 deny）或标记写不进去：都只提醒，保证每会话至多 deny 一次、且不会死循环拦截。
-            nudge_status, reminder_text = "reminded", rd.NUDGE_REMIND_TEXT
+            nudge_status, reminder_text = "reminded", rd.nudge_text("remind", nudge_summary)
     elif n["action"] == "remind":
         nudge_status, reminder_text = "reminded", n["text"]
 
