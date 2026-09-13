@@ -59,7 +59,7 @@ def cmd_doctor(ddir, data_from_host):
     else:
         print("结论：当前数据目录没有 Codex spawn hook 记录；不能区分未安装、未信任或调用绕过 hook。")
         if mode == "off":
-            print("补充：当前 mode=off 按设计不写判定日志；先切回 audit 再做验证。")
+            print("补充：当前 mode=off 按设计不写判定日志；先切回 guard 或 audit 再做验证。")
 
     print("\n下一步：")
     print("- 此命令不能读取或证明 Codex 的 hook 信任状态。")

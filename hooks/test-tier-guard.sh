@@ -434,6 +434,19 @@ runnudge auto "$(mksess se2 "只读检查一遍。${SECRET_TOKEN}" - nomodel)"
 check "nudge：deny 的 stdout 不含 prompt 原文" "$(yn out_lacks_token)"
 check "nudge：deny 的日志不含 prompt 原文" "$(lastnudgelog '"'"${SECRET_TOKEN}"'" not in json.dumps(r, ensure_ascii=False)')"
 
+# ── guard（默认 profile，Task 14）：拦一次、之后提醒；pre_dispatch_apply=true 也从不改写参数 ──
+runnudge guard "$(mksess G1 "${NUDGE_TASK}" - nomodel)"
+check "guard：gate 开 + 新会话未 pin → deny（常量开头 + 候选摘要），不带 updatedInput" \
+  "$(nudgeq 'o["hookSpecificOutput"]["permissionDecision"] == "deny" and deny_ok(o["hookSpecificOutput"]["permissionDecisionReason"]) and "updatedInput" not in o["hookSpecificOutput"]')"
+check "guard：deny 记 profile=guard、nudge=denied、applied=false" \
+  "$(lastnudgelog 'r["decision"]["profile"] == "guard" and r["nudge"] == "denied" and r["applied"] is False')"
+runnudge guard "$(mksess G1 "${NUDGE_TASK}" - nomodel)"
+check "guard：同会话第二次未 pin → 只提醒；claude-code pre_dispatch_apply=true 也不带 updatedInput" \
+  "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and "updatedInput" not in o["hookSpecificOutput"] and remind_ok(o["hookSpecificOutput"]["additionalContext"])')"
+check "guard：第二次记 nudge=reminded、applied=false" "$(lastnudgelog 'r["nudge"] == "reminded" and r["applied"] is False')"
+runnudgeprod guard "$(mksess G2 "${NUDGE_TASK}" - nomodel)"
+check "guard：生产目录（dispatch_nudge=false）→ 退出 0、stdout 空（不改写、不提醒）" "$(yn [ "${RC}" -eq 0 -a -z "${OUT}" ])"
+
 # ── 并发：同一轮并行派出的多个 Agent 会并发跑 hook，都读到「没 deny 过」──
 # 用 python 把这个时序固定下来（已 deny 检查恒为 False），只有抢到 O_EXCL 标记的那次能 deny。
 NRACED="${TMP}/nudge-race"

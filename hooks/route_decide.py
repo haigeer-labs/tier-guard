@@ -32,7 +32,7 @@ import sys
 
 TIERS = ("T0", "T1", "T2")
 MODES = ("off", "dry-run", "auto")
-ROUTING_PROFILES = ("off", "audit", "auto")
+ROUTING_PROFILES = ("off", "audit", "guard", "auto")
 EXECUTORS = ("claude", "codex")
 # OpenAI 自己定义的单调序列 —— 升档只踩这根有一手依据的杠杆
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
@@ -280,8 +280,8 @@ def _route(request, cfg):
     actual = _requested_candidate(candidates, requested)
     action = _comparison_action(recommended, actual)
     if requested.get("pinned", False):
-        # audit 要能审计“若未 pin 会往哪边路由”；target 仍为空，薄壳无从改写。
-        if cfg["mode"] == "audit":
+        # audit/guard 要能审计“若未 pin 会往哪边路由”；target 仍为空，薄壳无从改写。
+        if cfg["mode"] in ("audit", "guard"):
             return dict(base, action=action, target=None, recommended=_candidate_view(recommended), fallback=None)
         return dict(base, action="pinned", target=None, recommended=_candidate_view(recommended), fallback=None)
     return dict(base, action=action, target=_candidate_view(recommended),
@@ -340,7 +340,7 @@ def nudge_decision(profile, pinned, host_gate, session_id, already_denied, summa
         return {"action": "none", "text": None}
     if profile == "audit":
         return {"action": "remind", "text": nudge_text("remind", summary)}
-    # profile == "auto"：同一 session 第一次未 pin 派活 deny，之后只 remind。
+    # profile in ("guard", "auto")：同一 session 第一次未 pin 派活 deny，之后只 remind。
     if isinstance(session_id, str) and session_id and already_denied is not True:
         return {"action": "deny", "text": nudge_text("deny", summary)}
     return {"action": "remind", "text": nudge_text("remind", summary)}
@@ -782,8 +782,58 @@ def selftest():
         return False
     case("nudge：未知 profile → 抛 ValueError（适配层失败即放行）", nudge_raises())
 
-    # catalog_summary：nudge 文案附带的候选目录摘要，只从 catalog_candidates 派生
+    # Task 13：guard profile —— nudge 行为等同今天的 auto，audit 保持只提醒
+    case("nudge：ROUTING_PROFILES 包含 guard", "guard" in ROUTING_PROFILES)
+    case("nudge：guard + 有 session_id + 本会话未 deny 过 → deny",
+         nudge_decision("guard", False, True, "s1", False) == {"action": "deny", "text": NUDGE_DENY_TEXT})
+    case("nudge：guard + 本会话已 deny 过 → remind",
+         nudge_decision("guard", False, True, "s1", True) == {"action": "remind", "text": NUDGE_REMIND_TEXT})
+    case("nudge：guard + session_id 为空串 → remind",
+         nudge_decision("guard", False, True, "", False) == {"action": "remind", "text": NUDGE_REMIND_TEXT})
+    case("nudge：guard + session_id 为 None → remind",
+         nudge_decision("guard", False, True, None, False) == {"action": "remind", "text": NUDGE_REMIND_TEXT})
+    case("nudge：guard + host_gate=False → none",
+         nudge_decision("guard", False, False, "s1", False) == {"action": "none", "text": None})
+    case("nudge：guard + pinned=True → none",
+         nudge_decision("guard", True, True, "s1", False) == {"action": "none", "text": None})
+
+    # Task 13：route() 下 guard 与 audit 的决策必须一致（只有 profile 字段本身不同）
     catalog = load_catalog()
+    audit_catalog = copy.deepcopy(catalog)
+    audit_catalog["mode"] = "audit"
+    guard_catalog = copy.deepcopy(catalog)
+    guard_catalog["mode"] = "guard"
+
+    def _same_except_profile(a, b):
+        a, b = dict(a), dict(b)
+        a.pop("profile", None)
+        b.pop("profile", None)
+        return a == b
+
+    guard_pinned_req = {
+        "task": "改完后 git push 到 origin。\n验收：CI 绿。",
+        "host": "codex-cli",
+        "requested": {"model": "gpt-5.6-terra", "reasoning_effort": "high", "pinned": True},
+        "signals": {},
+    }
+    guard_unpinned_req = {
+        "task": "只读检查配置，禁止修改任何文件。\n验收：报告所有键名。",
+        "host": "codex-cli",
+        "requested": {"pinned": False},
+        "signals": {},
+    }
+    audit_pinned = route(guard_pinned_req, audit_catalog)
+    guard_pinned = route(guard_pinned_req, guard_catalog)
+    case("route：guard 下 pin 请求与 audit 一致（除 profile 外）",
+         guard_pinned["profile"] == "guard" and audit_pinned["profile"] == "audit"
+         and _same_except_profile(guard_pinned, audit_pinned))
+    audit_unpinned = route(guard_unpinned_req, audit_catalog)
+    guard_unpinned = route(guard_unpinned_req, guard_catalog)
+    case("route：guard 下未 pin 请求与 audit 一致（除 profile 外）",
+         guard_unpinned["profile"] == "guard" and audit_unpinned["profile"] == "audit"
+         and _same_except_profile(guard_unpinned, audit_unpinned))
+
+    # catalog_summary：nudge 文案附带的候选目录摘要，只从 catalog_candidates 派生
 
     def _in_order(text, subs):
         start = 0

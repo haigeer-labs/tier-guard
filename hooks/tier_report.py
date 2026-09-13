@@ -107,7 +107,7 @@ def _v2_audit(out, recs, recent):
     actions = Counter((r.get("decision") or {}).get("action") or "unknown" for r in routes)
     pinned = sum(bool(((r.get("decision") or {}).get("requested") or {}).get("pinned")) for r in routes)
     emitted = sum(bool(r.get("applied")) for r in routes)
-    out.append(f"共 {len(routes)} 次：audit：{profiles['audit']} / auto：{profiles['auto']} / off：{profiles['off']}；"
+    out.append(f"共 {len(routes)} 次：audit：{profiles['audit']} / guard：{profiles['guard']} / auto：{profiles['auto']} / off：{profiles['off']}；"
                f"hook 已输出改写 {emitted}；pin {pinned}；fallback {actions['pass'] + actions['unsupported']}。")
     # 实际执行只认 SubagentStop 从子代理 transcript 读到的值，严格按 tool_use_id 关联，不按时间或 prompt 猜。
     stops = {}
@@ -315,7 +315,7 @@ def render(ddir, recs, broken, recent, share_days=None, projects=None):
            f"- 当前 mode：**{mode}**（来源：{src}）",
            f"- 数据：`{os.path.join(ddir, 'decisions.jsonl')}`"]
     if recs is None:
-        out += ["", "还没有任何记录（文件不存在）。默认 audit 下 hook 每判一次子代理创建就会记一条。"]
+        out += ["", "还没有任何记录（文件不存在）。默认 guard 下 hook 每判一次子代理创建就会记一条。"]
         recs = []
     else:
         ts = [r["ts"] for r in recs if r.get("ts")]
@@ -421,7 +421,7 @@ def render(ddir, recs, broken, recent, share_days=None, projects=None):
     if report_cfg is None:
         out.append("配置读不到，无法判断。")
     elif report_cfg.get("schema_version") == 2:
-        out.append("v2 默认保持 audit；持久 auto 要等真实宿主质量校准与端到端证据后才会开放。")
+        out.append("v2 默认 profile 为 guard（不改写参数）；持久 auto 要等真实宿主质量校准与端到端证据后才会开放。")
     else:
         ok, reasons = gate(recs, labels, report_cfg)
         out.append("✅ 数据门槛已满足（切换仍需人工执行 `/tier-mode auto`）" if ok

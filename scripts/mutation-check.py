@@ -226,6 +226,14 @@ M = [
     ("nudge codex: 审计记录不写 nudge 字段（none/reminded/denied 全无从审计）", CX, TGC,
      '''           "nudge": nudge_status, "applied": False}''',
      '''           "applied": False}''', "killed"),
+    ("guard adapter: claude 把 guard 当 auto 输出 updatedInput（guard 本该从不改写参数）", CH, TTG,
+     '''    if (mode == "auto" and host_pre_dispatch_apply''',
+     '''    if (mode in ("auto", "guard") and host_pre_dispatch_apply''', "killed"),
+    ("guard adapter: codex 把 guard 当 auto 输出 updatedInput（guard 本该从不改写参数）", CX, TGC,
+     '''    if (mode == "auto" and host_pre_dispatch_apply''',
+     '''    if (mode in ("auto", "guard") and host_pre_dispatch_apply''', "killed"),
+    ("guard report: profile 计数行漏掉 guard", TR, TTC,
+     ''' / guard：{profiles['guard']}''', '''''', "killed"),
     # ── Task 5：skill 同步 / 路径引用 / mode 状态 / 报表 ──
     ("skill-sync: 不比 v2 候选表（配置漂移漏网）", SS, TC,
      '''        if got != want:''', '''        if False:''', "killed"),
@@ -408,6 +416,20 @@ M = [
     ("report nudge: 没有记录时的空文案再也不打印", TR, TTC,
      '''    if not routes:\n        out.append("没有提醒记录（宿主 dispatch_nudge 未开启或尚未派活）。")\n        return''',
      '''    if not routes:\n        return''', "killed"),
+    # ── Task 13：guard profile —— audit 与 auto 之间新增的、无门槛可持久化的默认档 ──
+    ("guard: ROUTING_PROFILES 里缺了 guard（校验和 nudge 都认不出这个 profile）", RD, RDT,
+     '''ROUTING_PROFILES = ("off", "audit", "guard", "auto")''',
+     '''ROUTING_PROFILES = ("off", "audit", "auto")''', "killed"),
+    ("guard: nudge_decision 把 guard 当成只提醒（本该像 auto 一样每会话先 deny 一次）", RD, RDT,
+     '''    if profile == "audit":\n        return {"action": "remind", "text": nudge_text("remind", summary)}''',
+     '''    if profile in ("audit", "guard"):\n        return {"action": "remind", "text": nudge_text("remind", summary)}''', "killed"),
+    ("guard: route() 里 guard 走了 auto 的 pinned 分支（pin 请求会被当成 pinned 而非可审计的 action）", RD, RDT,
+     '''        if cfg["mode"] in ("audit", "guard"):''',
+     '''        if cfg["mode"] == "audit":''', "killed"),
+    ("guard: tier_state 把 set guard 也送进 auto 的质量门槛（guard 本该像 audit 一样无门槛持久化）", TS, TTC,
+     '''    if mode == "auto":''', '''    if mode in ("auto", "guard"):''', "killed"),
+    ("guard: 生产目录默认值被改回 audit（guard 应该是当前的默认 mode）", "config/routing.catalog.v2.json", RTC,
+     '''"mode": "guard",''', '''"mode": "audit",''', "killed"),
 ]
 
 SUMMARY = re.compile(r"总计 [1-9]\d* 通过 / 0 失败|route contract: OK")

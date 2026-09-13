@@ -7,12 +7,12 @@ hook（claude_hook.py）、/tier-report、/tier-mode 共用这一份 —— 数�
   数据目录  --data 参数 → TIER_GUARD_LOG_DIR → CLAUDE_PLUGIN_DATA → ~/.local/state/tier-guard
   mode      TIER_GUARD_MODE → <数据目录>/mode（/tier-mode 写的）→ 配置默认值
 
-/tier-mode 的 v2 默认是 audit；持久 auto 要等真实宿主质量校准。旧 v1 配置仍可显式读取，
-其 mode 集合是 off / dry-run / auto，供历史日志和迁移测试兼容。
+/tier-mode 的 v2 默认值来自目录配置的 mode 字段（当前是 guard）；持久 auto 要等真实宿主质量校准。
+旧 v1 配置仍可显式读取，其 mode 集合是 off / dry-run / auto，供历史日志和迁移测试兼容。
 
 用法:
   python3 hooks/tier_state.py show [--data DIR]
-  python3 hooks/tier_state.py set <off|audit|auto> [--data DIR]
+  python3 hooks/tier_state.py set <off|audit|guard|auto> [--data DIR]
 """
 import hashlib
 import os
@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import route_decide as rd  # noqa: E402
 
 LEGACY_SETTABLE = ("off", "dry-run", "auto")
-V2_SETTABLE = ("off", "audit", "auto")
+V2_SETTABLE = ("off", "audit", "guard", "auto")
 
 
 def data_dir(explicit=None):
@@ -113,7 +113,8 @@ def cmd_set(ddir, mode, cfg):
         return 1
     if mode == "auto":
         if isinstance(cfg, dict) and cfg.get("schema_version") == 2:
-            print("❌ v2 还没有真实宿主的质量校准证据，拒绝把持久 mode 切到 auto；保持 audit。")
+            print("❌ v2 还没有真实宿主的质量校准证据，拒绝把持久 mode 切到 auto；"
+                  f"保持目录默认值（当前是 {cfg.get('mode')!r}）。")
             return 1
         import tier_report                     # 门槛的算法只在 tier_report 里
         recs, _ = tier_report.load(os.path.join(ddir, "decisions.jsonl"))

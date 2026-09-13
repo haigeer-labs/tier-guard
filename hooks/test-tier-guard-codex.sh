@@ -352,6 +352,17 @@ check "nudge：同一 session A 第二次未 pin → 不再 deny，只提醒（�
   "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and "updatedInput" not in o["hookSpecificOutput"] and remind_ok(o["hookSpecificOutput"]["additionalContext"])')"
 check "nudge：session A 第二次记 nudge=reminded" "$(lastnudgelog 'r["nudge"] == "reminded"')"
 
+# ── guard（默认 profile，Task 14）：merged 目录 pre_dispatch_apply=true 也只拦一次 / 提醒，从不改写 ──
+runnudgemerged guard "$(spn G1 "${NUDGE_TASK}" - - all)"
+check "guard：merged 目录 + 新会话未 pin → deny，不带 updatedInput" \
+  "$(nudgeq 'o["hookSpecificOutput"]["permissionDecision"] == "deny" and deny_ok(o["hookSpecificOutput"]["permissionDecisionReason"]) and "updatedInput" not in o["hookSpecificOutput"]' "${V2_NUDGE_MERGED_CONFIG}")"
+check "guard：deny 记 profile=guard、nudge=denied、applied=false" \
+  "$(lastnudgelog 'r["decision"]["profile"] == "guard" and r["nudge"] == "denied" and r["applied"] is False')"
+runnudgemerged guard "$(spn G1 "${NUDGE_TASK}" - - all)"
+check "guard：同会话第二次未 pin → 只提醒，从不 updatedInput / permissionDecision" \
+  "$(nudgeq '"permissionDecision" not in o["hookSpecificOutput"] and "updatedInput" not in o["hookSpecificOutput"] and remind_ok(o["hookSpecificOutput"]["additionalContext"])' "${V2_NUDGE_MERGED_CONFIG}")"
+check "guard：第二次记 nudge=reminded、applied=false" "$(lastnudgelog 'r["nudge"] == "reminded" and r["applied"] is False')"
+
 runnudgemerged auto "$(spn E "${NUDGE_TASK}" - -)"
 check "nudge：宿主已验证 pre_dispatch_apply 时，session E 第一次仍先 deny（deny 压过改写）" \
   "$(nudgeq 'o["hookSpecificOutput"]["permissionDecision"] == "deny" and "updatedInput" not in o["hookSpecificOutput"]')"

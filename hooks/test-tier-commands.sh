@@ -40,16 +40,18 @@ hookcurrent() {  # $1=数据目录 $2=事件 $3=payload
   printf '%s' "$3" | env -u TIER_GUARD_MODE HOME="${FAKEHOME}" TIER_GUARD_LOG_DIR="$1" \
     /bin/bash "${ROOT}/hooks/tier-guard.sh" "$2"
 }
-v2_state_audit() {
-  python3 - "${V2STATE}/decisions.jsonl" <<'PY'
+v2_state_profile() {  # $1=期望的 profile
+  python3 - "${V2STATE}/decisions.jsonl" "$1" <<'PY'
 import json, sys
 try:
     record = json.loads(open(sys.argv[1], encoding="utf-8").read().splitlines()[-1])
-    raise SystemExit(0 if record["decision"]["profile"] == "audit" else 1)
+    raise SystemExit(0 if record["decision"]["profile"] == sys.argv[2] else 1)
 except Exception:
     raise SystemExit(1)
 PY
 }
+v2_state_audit() { v2_state_profile audit; }
+v2_state_guard() { v2_state_profile guard; }
 mk() {  # $1=prompt $2=model(- 不传)
   python3 -c 'import json,sys
 ti={"description":"t","prompt":sys.argv[1],"subagent_type":"general-purpose"}
@@ -121,10 +123,10 @@ echo "═══ v2 路由审计 ═══"
 V2DATA="${TMP}/v2-data"
 V2STATE="${TMP}/v2-state"
 V2SIMPLE=$'只读审查配置，禁止修改任何文件。\n验收：报告所有键名。'
-check "运行时默认：mode 命令读取 v2 audit" "$(yn has "$(statecurrent show)" "当前 mode：audit")"
+check "运行时默认：mode 命令读取 v2 guard" "$(yn has "$(statecurrent show)" "当前 mode：guard")"
 hookcurrent "${V2STATE}" agent "$(mk "${V2SIMPLE}" -)" >/dev/null
-check "运行时默认：Claude hook 产生 v2 审计记录" "$(yn v2_state_audit)"
-check "v2 mode：默认是 audit" "$(yn has "$(statev2 show)" "当前 mode：audit")"
+check "运行时默认：Claude hook 产生 v2 审计记录（默认 profile guard）" "$(yn v2_state_guard)"
+check "v2 mode：默认是 guard" "$(yn has "$(statev2 show)" "当前 mode：guard")"
 statev2 set audit >/dev/null; RC=$?
 check "v2 mode：set audit 写入状态文件" "$(yn [ "${RC}" -eq 0 -a "$(cat "${V2STATE}/mode")" = audit ])"
 statev2 set dry-run >/dev/null; RC=$?
@@ -134,6 +136,11 @@ check "v2 mode：无真实宿主质量证据时拒绝持久 auto" "$(yn [ "${RC}
 hookv2state "${V2STATE}" agent "$(mk "${V2SIMPLE}" -)" >/dev/null
 check "v2 mode：hook 从状态文件读 audit" \
   "$(yn v2_state_audit)"
+statev2 set guard >/dev/null; RC=$?
+check "v2 mode：set guard 写入状态文件（无门槛）" "$(yn [ "${RC}" -eq 0 -a "$(cat "${V2STATE}/mode")" = guard ])"
+hookv2state "${V2STATE}" agent "$(mk "${V2SIMPLE}" -)" >/dev/null
+check "v2 mode：hook 从状态文件读 guard" \
+  "$(yn v2_state_guard)"
 hookv2 "${V2DATA}" audit agent "$(mk "${V2SIMPLE}" -)" >/dev/null
 hookv2 "${V2DATA}" auto agent "$(mk "${V2SIMPLE}" -)" >/dev/null
 # 显式 model 是 pin：真实 hook 要记录建议，但绝不能偷偷覆盖用户指定值。
@@ -143,9 +150,14 @@ check "v2 report：列出请求、选择、hook 改写输出与实际观测" \
   "$(yn has "${V2REP}" "### v2 路由审计")"
 v2_host_capability() { has "${V2REP}" "宿主可改写" && has "${V2REP}" "是"; }
 check "v2 report：列出宿主是否获准派发前改写" "$(yn v2_host_capability)"
-v2_profiles() { has "${V2REP}" "audit：2 / auto：1" && has "${V2REP}" "haiku"; }
+v2_profiles() { has "${V2REP}" "audit：2 / guard：0 / auto：1" && has "${V2REP}" "haiku"; }
 check "v2 report：audit / auto 分开且能看到 selected haiku" \
   "$(yn v2_profiles)"
+# guard 记录单独计数（Task 14）：用生产目录让真 hook 以 guard 写一条
+V2GUARD="${TMP}/v2-guard"
+hookv2 "${V2GUARD}" guard agent "$(mk "${V2SIMPLE}" -)" >/dev/null
+v2_guard_count() { has "$(env -u TIER_GUARD_MODE HOME="${FAKEHOME}" python3 "${ROOT}/hooks/tier_report.py" --data "${V2GUARD}")" "audit：0 / guard：1 / auto：0"; }
+check "v2 report：guard 记录单独计数" "$(yn v2_guard_count)"
 v2_pin() { has "${V2REP}" "pin 1" && has "${V2REP}" "| lower |"; }
 check "v2 report：audit 的 pin 保留方向建议、仍不写成实际执行" \
   "$(yn v2_pin)"
