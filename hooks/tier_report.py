@@ -97,6 +97,18 @@ def _late_actual(stop):
     return {"model": model, "reasoning_effort": None} if model else None
 
 
+def _v2_stops(recs):
+    """→ {tool_use_id: 实际执行}。实际执行只认 SubagentStop 从子代理 transcript 读到的值，
+    严格按 tool_use_id 关联，不按时间或 prompt 猜。"""
+    stops = {}
+    for r in recs:
+        if r.get("event") == "subagent-stop" and r.get("tool_use_id"):
+            execution = r["actual_execution"] if isinstance(r.get("actual_execution"), dict) else _late_actual(r)
+            if execution:
+                stops[r["tool_use_id"]] = execution
+    return stops
+
+
 def _v2_audit(out, recs, recent):
     routes = _v2_routes(recs)
     out += ["", "### v2 路由审计", ""]
@@ -109,14 +121,8 @@ def _v2_audit(out, recs, recent):
     emitted = sum(bool(r.get("applied")) for r in routes)
     out.append(f"共 {len(routes)} 次：audit：{profiles['audit']} / guard：{profiles['guard']} / auto：{profiles['auto']} / off：{profiles['off']}；"
                f"hook 已输出改写 {emitted}；pin {pinned}；fallback {actions['pass'] + actions['unsupported']}。")
-    # 实际执行只认 SubagentStop 从子代理 transcript 读到的值，严格按 tool_use_id 关联，不按时间或 prompt 猜。
-    stops = {}
-    for r in recs:
-        if r.get("event") == "subagent-stop" and r.get("tool_use_id"):
-            execution = r["actual_execution"] if isinstance(r.get("actual_execution"), dict) else _late_actual(r)
-            if execution:
-                stops[r["tool_use_id"]] = execution
-    out += ["", "| 时间 | 宿主 | 宿主可改写 | 请求 | 选择 / 建议 | hook 改写输出 | 实际执行 | 动作 |",
+    stops = _v2_stops(recs)
+    out +=["", "| 时间 | 宿主 | 宿主可改写 | 请求 | 选择 / 建议 | hook 改写输出 | 实际执行 | 动作 |",
             "|---|---|---|---|---|---|---|---|"]
     for r in routes[-recent:]:
         d = r["decision"]
@@ -364,15 +370,24 @@ def render(ddir, recs, broken, recent, share_days=None, projects=None):
     if fallbacks:
         out.append("兜底来源：" + "、".join(f"{k} {v}" for k, v in sorted(fallbacks.items())))
 
-    # 建议 vs 实际
+    # 建议 vs 实际。v1 按 tier 比高低；v2 记录没有 tier，只报按 tool_use_id 已观测的实际执行次数
+    # （逐条见「v2 路由审计」表）——实际模型与候选档的高低比较是判据，不在报告里推算。
     pairs = join(recs)
+    v2_routes = _v2_routes(recs)
+    legacy_agents = [a for a in agents if a.get("routing_version") != 2]
     linked = [(a, st) for a, st in pairs if st and st.get("actual_tier") and a["decision"].get("tier")]
     under_actual = [(a, st) for a, st in linked
                     if rd.rank(st["actual_tier"]) < rd.rank(a["decision"]["tier"])]
     esc = sum(1 for r in recs if r.get("event") == "subagent-stop" and r.get("escalated"))
-    out += ["", "### 建议档 vs 实际执行档（SubagentStop）", "",
-            f"已关联 {len(linked)} / {len(agents)} 次；**实际欠配**（实际档低于建议档）{len(under_actual)} 次；"
-            f"疑似升级触发（子代理照合同交回）{esc} 次"]
+    out += ["", "### 建议档 vs 实际执行档（SubagentStop）", ""]
+    if v2_routes:
+        v2_stops = _v2_stops(recs)
+        seen = sum(1 for r in v2_routes if r.get("tool_use_id") in v2_stops)
+        out.append(f"v2：已观测实际执行 {seen} / {len(v2_routes)} 次（逐条见「v2 路由审计」表；报告不比较实际档高低）")
+    if legacy_agents or not v2_routes:
+        out.append(f"{'v1 旧记录：' if v2_routes else ''}已关联 {len(linked)} / {len(legacy_agents)} 次；"
+                   f"**实际欠配**（实际档低于建议档）{len(under_actual)} 次；"
+                   f"疑似升级触发（子代理照合同交回）{esc} 次")
     for a, st in under_actual[-recent:]:
         out.append(f"- `{a.get('tool_use_id')}`：建议 {a['decision']['tier']}，实际 {st['actual_tier']}（{st.get('actual_model')}）")
 

@@ -3,6 +3,15 @@
 All notable user-facing changes are documented here. Version numbers follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `/tier-report` no longer shows "linked 0 / N" in the suggested-vs-actual
+  section for v2 records: it now reports how many v2 dispatches have an
+  observed actual execution (matching the routing audit table), and the v1
+  line counts only legacy records.
+
 ## [0.2.0] - 2026-09-14
 
 ### Added

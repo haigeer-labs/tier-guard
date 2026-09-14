@@ -111,6 +111,7 @@ check "report：Codex 表格给出建议值（不一致那条建议 xhigh）" "$
 check "report：当前 mode 来自状态文件" "$(yn has "${REP}" "当前 mode：**dry-run**")"
 c_sections() { has "${REP}" "### 建议档 vs 实际执行档" && has "${REP}" "### 打回率" && has "${REP}" "### 误报率" && has "${REP}" "### 切 auto 的门槛"; }
 check "report：建议 vs 实际 / 打回率 / 误报率 / auto 门槛 四节都在" "$(yn c_sections)"
+c_v1_only_link() { has "${REP}" "已关联 0 / 5 次" && ! has "${REP}" "v1 旧记录：" && ! has "${REP}" "v2：已观测实际执行"; }
 check "report：全是无 nudge 字段的旧记录 → 提醒段落明说没有记录" \
   "$(yn has "${REP}" "没有提醒记录（宿主 dispatch_nudge 未开启或尚未派活）。")"
 printf 'not json\n' >> "${DATA}/decisions.jsonl"
@@ -210,6 +211,18 @@ PY
 LATEREP="$(env -u TIER_GUARD_MODE HOME="${FAKEHOME}" python3 "${ROOT}/hooks/tier_report.py" --data "${V2LATE}")"
 v2_late() { has "${LATEREP}" "| claude-sonnet-5 |" && ! has "${LATEREP}" "| 未观测 |"; }
 check "v2 report：SubagentStop 时 transcript 未落盘，报告回读后仍列出实际模型" "$(yn v2_late)"
+
+# 「建议档 vs 实际执行档」一节原先只认 v1 的 tier 字段，v2 恒显示「已关联 0 / N」，与表格里已入账的实际执行矛盾
+# （2026-09-14 安装版 0.2.0 真实宿主验收发现）。v2 只报已观测次数，档位高低不在报告里推算。
+v2_link_line() { has "${JOINREP}" "v2：已观测实际执行 1 / 2 次" && ! has "${JOINREP}" "已关联 0 / 2 次"; }
+check "v2 report：建议 vs 实际一节按 tool_use_id 报已观测次数，不再恒为已关联 0" "$(yn v2_link_line)"
+check "v2 report：建议 vs 实际一节同样回读未落盘的 transcript" "$(yn has "${LATEREP}" "v2：已观测实际执行 1 / 1 次")"
+check "v1 report：只有旧记录时仍按 v1 口径，不出现 v2 行" "$(yn c_v1_only_link)"
+V2MIXED="${TMP}/v2-mixed"; mkdir -p "${V2MIXED}"
+cat "${DATA}/decisions.jsonl" "${V2JOIN}/decisions.jsonl" > "${V2MIXED}/decisions.jsonl"
+MIXEDREP="$(env -u TIER_GUARD_MODE HOME="${FAKEHOME}" python3 "${ROOT}/hooks/tier_report.py" --data "${V2MIXED}")"
+v2_mixed_link() { has "${MIXEDREP}" "v1 旧记录：已关联 0 / 5 次" && has "${MIXEDREP}" "v2：已观测实际执行 1 / 2 次"; }
+check "混合日志：v1 分母只数旧记录，v2 单独报已观测次数" "$(yn v2_mixed_link)"
 
 echo ""
 echo "═══ 主代理预路由提醒（Task 12） ═══"
