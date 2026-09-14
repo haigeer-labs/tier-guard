@@ -34,7 +34,7 @@
     2026-09-13 用户确认暂不处理，继续积累数据
   - [ ] Claude audit 提醒在真实宿主送达但未被采纳（1 轮、提醒后 2 次派活）。2026-09-13 用户确认：不改 audit 语义，
     留到 Task 12 用每宿主 ≥10 次自然派活的数据再决定
-- [ ] Task 12 · 报告与自然触发真实宿主评估（每宿主 ≥10 次，开闸门前再确认）
+- [x] Task 12 · 报告与自然触发真实宿主评估（每宿主 ≥10 次，开闸门前再确认）——audit 下未达标，由 Task 13–15 的 guard 取代并关闭
   - [x] `/tier-report` 新增「主代理预路由提醒」统计：提醒 / 拦截 / 未触发次数、提醒后同会话显式传参比例、pin 被打扰次数
   - [x] 真实宿主评估（2026-09-13，每宿主 4 会话 12 次派活）：Claude 显式传参 8/10、取舍类 2/4（audit 未达标）、pin 0；
     Codex 自然预路由 12/12（提醒指标无样本）、取舍类 4/4、pin 0。证据：[`dispatch nudge e2e`](../../docs/research/2026-09-13-dispatch-nudge-e2e.md)
@@ -60,12 +60,20 @@
   实际回执为 `claude-haiku-4-5-20251001`。生产仍默认 audit，Cloud 未外推。详见
   [`Claude CLI v2 smoke`](../../docs/research/2026-09-13-claude-cli-v2-smoke.md)。
 
-- [ ] Claude Code CLI v2 完整端到端验收（A/B/C/D，报告自动记录实际执行）。2026-09-13 首轮未通过：
+- [x] Claude Code CLI v2 完整端到端验收（A/B/C/D，报告自动记录实际执行）。2026-09-13 首轮未通过：
   v2 跳过 `SubagentStop`，且当轮 mode 实为 audit。工作树修复后以 `--plugin-dir` 复测：点名 tier-routing 的
   主代理预路由三档实际为 haiku / sonnet / opus，报告实际执行三条全部入账。详见
   [`Claude CLI v2 e2e`](../../docs/research/2026-09-13-claude-cli-v2-e2e.md)。
-- [ ] 自然触发：不点名 tier-routing 时主代理自行选择子代理模型。2026-09-13 Claude CLI 与 Codex CLI 均未通过——
+- [x] 自然触发：不点名 tier-routing 时主代理自行选择子代理模型。2026-09-13 Claude CLI 与 Codex CLI 均未通过——
   主代理都没有加载 skill，三个子代理全部继承父代理参数。详见同一文档。
+  2026-09-14 以已安装的 `0.2.0`（默认 guard，无 `--plugin-dir`、无 `TIER_GUARD_MODE`）在 Claude CLI 复测两轮 A/B/C/D，上一项一并通过：
+  主代理未加载 skill，第一次未 pin 派活被拦截后按目录显式传 haiku / sonnet / opus，D 的 pin 未被打扰，实际执行 8/8 与请求一致并入账报告。
+  Codex 闸门仍关闭，Codex 自然触发以 Task 15（主代理 12/12 自行显式传参）为准。详见
+  [`v0.2.0 release`](../../docs/research/2026-09-14-v0.2.0-release.md)。
+
+- [ ] 观察（2026-09-14 安装版验收发现，未修复）：`/tier-report`「建议档 vs 实际执行档（SubagentStop）」只按 v1 字段关联，
+  v2 记录恒显示「已关联 0 / N」，与表格里已入账的实际执行矛盾。修复需先红后绿并随下个版本发布，动手前先问。
+  详见 [`v0.2.0 release`](../../docs/research/2026-09-14-v0.2.0-release.md)。
 
 ## 上游前置条件（不在本插件内绕过）
 
