@@ -372,10 +372,10 @@ into a broad routing claim.
 
 ### Final checkpoint: v2 review
 
-- [ ] All plan acceptance criteria and repository validation pass.
+- [ ] All plan acceptance criteria and repository validation pass. (Blocked: Task 7 waits on Codex providing task text or trusted structured labels before dispatch.)
 - [x] A fresh reviewer verifies model selection can move down as well as up.
-- [ ] Real-host evidence exists for every claimed automatic host.
-- [ ] Semantic-provider network integration remains disabled unless separately approved.
+- [x] Real-host evidence exists for every claimed automatic host. Only Claude Code CLI is claimed automatic in Host compatibility; its controlled auto run started an unpinned read-only child on `claude-haiku-4-5-20251001` (`docs/research/2026-09-13-claude-cli-v2-smoke.md`). Codex CLI / Desktop remain advisory. Checked 2026-09-14.
+- [x] Semantic-provider network integration remains disabled unless separately approved. Catalog `semantic_provider.mode` is `disabled`; every local v2 routing record reports `disabled` (Claude 30, Codex 14); hooks import no network client. Checked 2026-09-14.
 
 ## Risks and mitigations
 
